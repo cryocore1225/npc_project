@@ -122,6 +122,7 @@ type Localized = {
 const MODEL_PATH = '/model/model.json'
 const MODEL_VERSION = 'model-v2'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
+const LANG_STORAGE_KEY = 'npc_lang'
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
 const LOG_STORAGE_KEY = 'npc_inference_logs_v1'
@@ -361,7 +362,11 @@ const textMap: Record<Lang, Localized> = {
 }
 
 export default function Page() {
-  const [lang, setLang] = useState<Lang>('zh')
+  const [lang, setLang] = useState<Lang>(() => {
+    if (typeof window === 'undefined') return 'zh'
+    const saved = localStorage.getItem(LANG_STORAGE_KEY)
+    return saved === 'ko' ? 'ko' : 'zh'
+  })
   const t = textMap[lang]
 
   const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
@@ -397,6 +402,10 @@ export default function Page() {
 
   const supportsCamera =
     typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+
+  useEffect(() => {
+    localStorage.setItem(LANG_STORAGE_KEY, lang)
+  }, [lang])
 
   const ensureModelReady = useCallback(async () => {
     if (modelRef.current && tfRef.current) {
