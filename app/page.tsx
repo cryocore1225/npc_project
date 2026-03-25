@@ -22,6 +22,15 @@ type PredictionItem = {
   label: LabelKey
   confidence: number
 }
+type RawPredictionItem = {
+  className: ObjectClassKey
+  confidence: number
+}
+type PredictionAnalysis = {
+  mappedTop3: PredictionItem[]
+  rawTop3: RawPredictionItem[]
+  isUndetermined: boolean
+}
 
 type Localized = {
   eyebrow: string
@@ -64,6 +73,11 @@ type Localized = {
   resultTitle: string
   confidence: string
   top3Title: string
+  rawTop3Title: string
+  undeterminedTitle: string
+  undeterminedHint: string
+  lowConfidenceHint: string
+  reasonTitle: string
   guideTitle: string
   quickTipsTitle: string
   quickTips: string[]
@@ -78,12 +92,15 @@ type Localized = {
   closeButton: string
   switchCameraButton: string
   mirrorHint: string
+  rawLabels: Record<ObjectClassKey, string>
+  reasonHints: Record<ObjectClassKey, string>
   labels: Record<LabelKey, string>
   descriptions: Record<LabelKey, string>
 }
 
 const MODEL_PATH = '/model/model.json'
 const IMAGE_SIZE = 224
+const LOW_CONFIDENCE_THRESHOLD = 0.45
 const supportedLabels: LabelKey[] = [
   'General waste',
   'Food waste',
@@ -147,6 +164,11 @@ const textMap: Record<Lang, Localized> = {
     resultTitle: '识别结果',
     confidence: '置信度',
     top3Title: 'Top 3 候选',
+    rawTop3Title: '原始物体识别 Top 3',
+    undeterminedTitle: '不可判定',
+    undeterminedHint: '当前结果置信度较低，建议重拍或更换角度后再试。',
+    lowConfidenceHint: '识别置信度低于 45%',
+    reasonTitle: '判定依据',
     guideTitle: '投放指南',
     quickTipsTitle: '快速提示',
     quickTips: [
@@ -165,6 +187,26 @@ const textMap: Record<Lang, Localized> = {
     closeButton: '关闭',
     switchCameraButton: '切换摄像头',
     mirrorHint: '前置画面已校正为非镜像',
+    rawLabels: {
+      can: '易拉罐',
+      bottle: '瓶子',
+      food: '食物',
+      battery: '电池',
+      paper: '纸类',
+      plastic: '塑料包装',
+      furniture: '家具/大件',
+      background: '背景',
+    },
+    reasonHints: {
+      can: '检测到罐体轮廓和金属反光特征。',
+      bottle: '检测到瓶身形状与瓶口结构特征。',
+      food: '检测到食物纹理与有机残余特征。',
+      battery: '检测到电池形态与端点结构特征。',
+      paper: '检测到纸张平面纹理与折痕特征。',
+      plastic: '检测到塑料包装高反光与薄膜边缘特征。',
+      furniture: '检测到大件结构轮廓（桌椅/家具体积特征）。',
+      background: '画面主体不明显，背景特征占比高。',
+    },
     labels: {
       'General waste': '一般垃圾',
       'Food waste': '厨余垃圾',
@@ -223,6 +265,11 @@ const textMap: Record<Lang, Localized> = {
     resultTitle: '분류 결과',
     confidence: '신뢰도',
     top3Title: 'Top 3 후보',
+    rawTop3Title: '원본 객체 인식 Top 3',
+    undeterminedTitle: '판정 불가',
+    undeterminedHint: '현재 결과 신뢰도가 낮습니다. 각도/거리 변경 후 다시 촬영하세요.',
+    lowConfidenceHint: '신뢰도 45% 미만',
+    reasonTitle: '판정 근거',
     guideTitle: '배출 가이드',
     quickTipsTitle: '빠른 팁',
     quickTips: [
@@ -241,6 +288,26 @@ const textMap: Record<Lang, Localized> = {
     closeButton: '닫기',
     switchCameraButton: '카메라 전환',
     mirrorHint: '전면 카메라는 좌우 반전 보정됨',
+    rawLabels: {
+      can: '캔',
+      bottle: '병',
+      food: '음식물',
+      battery: '배터리',
+      paper: '종이',
+      plastic: '플라스틱 포장',
+      furniture: '가구/대형물',
+      background: '배경',
+    },
+    reasonHints: {
+      can: '캔 형태와 금속 반사 특징이 감지되었습니다.',
+      bottle: '병 몸체와 입구 구조 특징이 감지되었습니다.',
+      food: '음식물 질감과 유기물 패턴이 감지되었습니다.',
+      battery: '배터리 형태와 단자 구조 특징이 감지되었습니다.',
+      paper: '종이 평면 질감과 접힘 패턴이 감지되었습니다.',
+      plastic: '플라스틱 포장 반사/필름 가장자리 특징이 감지되었습니다.',
+      furniture: '가구/대형물의 윤곽과 부피 특징이 감지되었습니다.',
+      background: '주요 대상보다 배경 특징 비중이 높습니다.',
+    },
     labels: {
       'General waste': '일반 쓰레기',
       'Food waste': '음식물 쓰레기',
@@ -273,6 +340,8 @@ export default function Page() {
   const [fileName, setFileName] = useState('')
   const [mainResult, setMainResult] = useState<PredictionItem | null>(null)
   const [topPredictions, setTopPredictions] = useState<PredictionItem[]>([])
+  const [rawTopPredictions, setRawTopPredictions] = useState<RawPredictionItem[]>([])
+  const [isUndetermined, setIsUndetermined] = useState(false)
 
   const tfRef = useRef<TfModule | null>(null)
   const modelRef = useRef<TfLayersModel | null>(null)
@@ -322,9 +391,11 @@ export default function Page() {
       setIsPredicting(true)
       try {
         const img = await readImage(url)
-        const results = await predictTop3(tfRef.current, modelRef.current, img)
-        setTopPredictions(results)
-        setMainResult(results[0] ?? null)
+        const analysis = await predictTop3(tfRef.current, modelRef.current, img)
+        setTopPredictions(analysis.mappedTop3)
+        setRawTopPredictions(analysis.rawTop3)
+        setIsUndetermined(analysis.isUndetermined)
+        setMainResult(analysis.isUndetermined ? null : (analysis.mappedTop3[0] ?? null))
       } catch (err) {
         setPredictionError((err as Error)?.message || defaultErrorMessage)
       } finally {
@@ -354,6 +425,7 @@ export default function Page() {
       const url = URL.createObjectURL(file)
       setPredictionError('')
       setMainResult(null)
+      setIsUndetermined(false)
       setImageUrl(url)
       setFileName(file.name || 'clipboard-image.png')
       void runPredictFromUrl(url)
@@ -479,6 +551,7 @@ export default function Page() {
 
     setPredictionError('')
     setMainResult(null)
+    setIsUndetermined(false)
 
     const url = URL.createObjectURL(file)
     setImageUrl(url)
@@ -497,6 +570,7 @@ export default function Page() {
 
     setPredictionError('')
     setMainResult(null)
+    setIsUndetermined(false)
     setImageUrl(target)
     setFileName('remote-image')
     setIsUploadPanelOpen(false)
@@ -526,6 +600,7 @@ export default function Page() {
 
       setPredictionError('')
       setMainResult(null)
+      setIsUndetermined(false)
       setImageUrl(url)
       setFileName('clipboard-image.png')
       setIsUploadPanelOpen(false)
@@ -726,7 +801,15 @@ export default function Page() {
         <section className="card result-card">
           <div className="section-heading">
             <h2>{t.resultTitle}</h2>
-            <p>{isPredicting ? t.analyzing : mainResult ? t.descriptions[mainResult.label] : t.previewEmpty}</p>
+            <p>
+              {isPredicting
+                ? t.analyzing
+                : isUndetermined
+                ? t.undeterminedHint
+                : mainResult
+                ? t.descriptions[mainResult.label]
+                : t.previewEmpty}
+            </p>
           </div>
 
           {predictionError ? <p className="error-text">{predictionError}</p> : null}
@@ -759,6 +842,54 @@ export default function Page() {
               <div className="guide-card">
                 <h3>{t.guideTitle}</h3>
                 <p>{t.descriptions[mainResult.label]}</p>
+              </div>
+            </>
+          ) : isUndetermined && topPredictions.length ? (
+            <>
+              <div className="result-chip chip-general-waste chip-undetermined">
+                {t.undeterminedTitle}
+              </div>
+
+              <p className="confidence-line">
+                {t.lowConfidenceHint}
+                <strong>{formatConfidence(topPredictions[0]?.confidence ?? 0)}</strong>
+              </p>
+
+              <div className="ranking-list">
+                <h3>{t.top3Title}</h3>
+                {topPredictions.map((item) => (
+                  <div key={item.label} className="ranking-item">
+                    <div className="ranking-meta">
+                      <span>{t.labels[item.label]}</span>
+                      <strong>{formatConfidence(item.confidence)}</strong>
+                    </div>
+                    <div className="ranking-track">
+                      <div className="ranking-fill" style={{ width: `${Math.max(item.confidence * 100, 6)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {rawTopPredictions.length ? (
+                <div className="ranking-list">
+                  <h3>{t.rawTop3Title}</h3>
+                  {rawTopPredictions.map((item) => (
+                    <div key={item.className} className="ranking-item">
+                      <div className="ranking-meta">
+                        <span>{t.rawLabels[item.className]}</span>
+                        <strong>{formatConfidence(item.confidence)}</strong>
+                      </div>
+                      <div className="ranking-track">
+                        <div className="ranking-fill" style={{ width: `${Math.max(item.confidence * 100, 6)}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="guide-card">
+                <h3>{t.reasonTitle}</h3>
+                <p>{getPredictionReason(rawTopPredictions[0]?.className, t)}</p>
               </div>
             </>
           ) : (
@@ -869,7 +1000,7 @@ async function readImage(src: string): Promise<HTMLImageElement> {
   return image
 }
 
-async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImageElement): Promise<PredictionItem[]> {
+async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImageElement): Promise<PredictionAnalysis> {
   const tensor = tf.tidy(() => {
     const pixels = tf.browser.fromPixels(source)
     const resized = tf.image.resizeBilinear(pixels, [IMAGE_SIZE, IMAGE_SIZE])
@@ -889,7 +1020,15 @@ async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImage
   tensor.dispose()
   output.dispose()
 
-  return mapScoresToTrashPredictions(scores)
+  const mappedTop3 = mapScoresToTrashPredictions(scores)
+  const rawTop3 = getRawObjectTop3(scores)
+  const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD
+
+  return {
+    mappedTop3,
+    rawTop3,
+    isUndetermined,
+  }
 }
 
 function mapToTrash(className: string): LabelKey {
@@ -935,6 +1074,23 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
     .map((label) => ({ label, confidence: bucket[label] }))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
+}
+
+function getRawObjectTop3(scores: number[]): RawPredictionItem[] {
+  if (scores.length !== supportedObjectClasses.length) return []
+
+  return scores
+    .map((confidence, index) => ({
+      className: supportedObjectClasses[index] ?? 'background',
+      confidence,
+    }))
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 3)
+}
+
+function getPredictionReason(className: ObjectClassKey | undefined, t: Localized) {
+  if (!className) return t.undeterminedHint
+  return t.reasonHints[className]
 }
 
 function getCameraErrorMessage(err: unknown, t: Localized) {

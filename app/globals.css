@@ -425,6 +425,11 @@ button:disabled {
   color: #6a4727;
 }
 
+.chip-undetermined {
+  background: rgba(179, 58, 36, 0.14);
+  color: #8f2819;
+}
+
 .confidence-line {
   margin: 16px 0 0;
   color: var(--muted);
