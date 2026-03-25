@@ -598,6 +598,10 @@ button:disabled {
   background: #000;
 }
 
+.camera-video-front {
+  transform: scaleX(-1);
+}
+
 .camera-hint {
   margin: 0;
   position: relative;
@@ -610,13 +614,30 @@ button:disabled {
   border-radius: 999px;
 }
 
+.camera-mirror-hint {
+  margin-top: 8px;
+}
+
 .camera-controls {
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 18px;
   position: relative;
   z-index: 2;
+}
+
+.camera-side-btn {
+  justify-self: start;
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  padding: 0 14px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.camera-controls .camera-side-btn:last-child {
+  justify-self: end;
 }
 
 .camera-shutter-btn {
@@ -642,14 +663,7 @@ button:disabled {
   transform: scale(0.92);
 }
 
-.camera-close-btn {
-  min-width: 76px;
-  background: rgba(0, 0, 0, 0.38);
-  border-color: rgba(255, 255, 255, 0.34);
-  color: #fff;
-}
-
-.camera-close-btn:hover:not(:disabled) {
+.camera-side-btn:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.62);
   background: rgba(0, 0, 0, 0.58);
 }

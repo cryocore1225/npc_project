@@ -68,6 +68,7 @@ type Localized = {
   cameraInUse: string
   closeButton: string
   switchCameraButton: string
+  mirrorHint: string
   labels: Record<LabelKey, string>
   descriptions: Record<LabelKey, string>
 }
@@ -144,6 +145,7 @@ const textMap: Record<Lang, Localized> = {
     cameraInUse: '摄像头可能被其他应用占用，请先关闭其它应用。',
     closeButton: '关闭',
     switchCameraButton: '切换摄像头',
+    mirrorHint: '前置画面已校正为非镜像',
     labels: {
       'General waste': '一般垃圾',
       'Food waste': '厨余垃圾',
@@ -219,6 +221,7 @@ const textMap: Record<Lang, Localized> = {
     cameraInUse: '다른 앱이 카메라를 사용 중일 수 있습니다.',
     closeButton: '닫기',
     switchCameraButton: '카메라 전환',
+    mirrorHint: '전면 카메라는 좌우 반전 보정됨',
     labels: {
       'General waste': '일반 쓰레기',
       'Food waste': '음식물 쓰레기',
@@ -404,6 +407,10 @@ export default function Page() {
     canvas.height = video.videoHeight || 720
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    if (cameraFacingMode === 'user') {
+      ctx.translate(canvas.width, 0)
+      ctx.scale(-1, 1)
+    }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
     const blob: Blob | null = await new Promise((resolve) =>
@@ -728,10 +735,20 @@ export default function Page() {
                 {t.switchCameraButton}
               </button>
             </div>
-            <video ref={videoRef} className="camera-video" playsInline muted autoPlay />
+            <video
+              ref={videoRef}
+              className={`camera-video ${cameraFacingMode === 'user' ? 'camera-video-front' : ''}`}
+              playsInline
+              muted
+              autoPlay
+            />
             {isOpeningCamera ? <p className="camera-hint">{t.cameraLoading}</p> : null}
+            {cameraFacingMode === 'user' ? <p className="camera-hint camera-mirror-hint">{t.mirrorHint}</p> : null}
             {cameraError ? <p className="error-text">{cameraError}</p> : null}
             <div className="camera-controls">
+              <button className="camera-side-btn" onClick={stopCamera} type="button">
+                {t.closeButton}
+              </button>
               <button
                 className="camera-shutter-btn"
                 onClick={captureFromCamera}
@@ -741,8 +758,8 @@ export default function Page() {
               >
                 <span />
               </button>
-              <button className="secondary-button camera-close-btn" onClick={stopCamera} type="button">
-                {t.closeButton}
+              <button className="camera-side-btn" onClick={switchCamera} type="button" disabled={isOpeningCamera}>
+                {t.switchCameraButton}
               </button>
             </div>
           </div>
