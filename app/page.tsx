@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
-import Image from 'next/image'
+import NextImage from 'next/image'
 
 type Lang = 'zh' | 'ko'
 type LabelKey = 'General waste' | 'Food waste' | 'Recyclables' | 'Hazardous waste' | 'Bulk waste'
@@ -823,7 +823,7 @@ export default function Page() {
           </div>
 
           {imageUrl ? (
-            <Image
+            <NextImage
               className="preview-image"
               src={imageUrl}
               alt="Selected waste item preview"
@@ -982,7 +982,7 @@ export default function Page() {
               autoPlay
             />
             {capturedPreviewUrl ? (
-              <Image
+              <NextImage
                 className="camera-captured-preview"
                 src={capturedPreviewUrl}
                 alt="Captured preview"
