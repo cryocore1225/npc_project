@@ -332,24 +332,29 @@ button:disabled {
   font-weight: 700;
 }
 
-.chip-plastic {
-  background: rgba(62, 120, 255, 0.14);
-  color: #224ebd;
-}
-
-.chip-paper {
-  background: rgba(132, 99, 63, 0.14);
-  color: #6a4727;
-}
-
-.chip-metal {
-  background: rgba(75, 85, 99, 0.14);
-  color: #374151;
+.chip-general-waste {
+  background: rgba(92, 107, 122, 0.16);
+  color: #3a4655;
 }
 
 .chip-food-waste {
   background: rgba(13, 138, 106, 0.15);
   color: #0b6d55;
+}
+
+.chip-recyclables {
+  background: rgba(62, 120, 255, 0.14);
+  color: #224ebd;
+}
+
+.chip-hazardous-waste {
+  background: rgba(179, 58, 36, 0.16);
+  color: #8f2819;
+}
+
+.chip-bulk-waste {
+  background: rgba(132, 99, 63, 0.16);
+  color: #6a4727;
 }
 
 .confidence-line {
@@ -426,6 +431,10 @@ button:disabled {
   color: var(--danger);
 }
 
+.camera-inline-error {
+  margin: 16px 0 0;
+}
+
 @media (max-width: 980px) {
   .content-grid {
     grid-template-columns: 1fr;
@@ -472,38 +481,103 @@ button:disabled {
     width: 100%;
   }
 }
-/* --- Camera overlay --- */
+/* --- Camera overlay (WeChat-like) --- */
 .camera-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(31, 26, 20, 0.45);
-  display: grid;
-  place-items: center;
-  z-index: 50;
-}
-.camera-box {
-  width: min(92vw, 760px);
-  padding: 16px;
-}
-.camera-video {
-  width: 100%;
-  max-height: 70vh;
-  border-radius: 16px;
   background: #000;
+  z-index: 100;
 }
-.camera-controls {
+
+.camera-box {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: max(env(safe-area-inset-top), 20px) 18px max(env(safe-area-inset-bottom), 20px);
+}
+
+.camera-head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 12px;
+  position: relative;
+  z-index: 2;
 }
-.danger-button {
-  min-height: 48px;
-  border-radius: 16px;
-  padding: 0 18px;
-  font-weight: 700;
-  border: 1px solid var(--danger);
-  background: var(--danger);
+
+.camera-ghost-btn {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 14px;
   color: #fff;
-  box-shadow: 0 14px 24px rgba(179, 58, 36, 0.22);
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.camera-video {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  background: #000;
+}
+
+.camera-hint {
+  margin: 0;
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  margin-top: 16px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.42);
+  padding: 8px 14px;
+  border-radius: 999px;
+}
+
+.camera-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  position: relative;
+  z-index: 2;
+}
+
+.camera-shutter-btn {
+  width: 80px;
+  height: 80px;
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  background: transparent;
+  border-radius: 999px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.camera-shutter-btn span {
+  width: 62px;
+  height: 62px;
+  border-radius: 999px;
+  background: #fff;
+  transition: transform 120ms ease;
+}
+
+.camera-shutter-btn:active span {
+  transform: scale(0.92);
+}
+
+.camera-close-btn {
+  min-width: 76px;
+  background: rgba(0, 0, 0, 0.38);
+  border-color: rgba(255, 255, 255, 0.34);
+  color: #fff;
+}
+
+.camera-close-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.62);
+  background: rgba(0, 0, 0, 0.58);
 }

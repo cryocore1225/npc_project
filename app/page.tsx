@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useRef, useState } from 'react'
 import * as tf from '@tensorflow/tfjs'
 
 type Lang = 'zh' | 'ko'
-type LabelKey = 'Plastic' | 'Paper' | 'Metal' | 'Food waste'
+type LabelKey = 'General waste' | 'Food waste' | 'Recyclables' | 'Hazardous waste' | 'Bulk waste'
 type ModelStatus = 'loading' | 'ready' | 'missing' | 'error'
 
 type PredictionItem = {
@@ -31,6 +31,12 @@ type Localized = {
   actionHint: string
   takePhotoButton: string
   uploadButton: string
+  pasteHint: string
+  urlPlaceholder: string
+  loadUrlButton: string
+  urlInvalid: string
+  urlLoadFailed: string
+  pasteNoImage: string
   previewTitle: string
   previewEmpty: string
   selectedFile: string
@@ -42,13 +48,28 @@ type Localized = {
   quickTipsTitle: string
   quickTips: string[]
   predictionError: string
+  cameraLoading: string
+  cameraOpenFailed: string
+  cameraUnsupported: string
+  cameraSecureContext: string
+  cameraPermissionDenied: string
+  cameraNoDevice: string
+  cameraInUse: string
+  closeButton: string
+  switchCameraButton: string
   labels: Record<LabelKey, string>
   descriptions: Record<LabelKey, string>
 }
 
 const MODEL_PATH = '/model/model.json'
 const IMAGE_SIZE = 224
-const supportedLabels: LabelKey[] = ['Plastic', 'Paper', 'Metal', 'Food waste']
+const supportedLabels: LabelKey[] = [
+  'General waste',
+  'Food waste',
+  'Recyclables',
+  'Hazardous waste',
+  'Bulk waste',
+]
 
 const textMap: Record<Lang, Localized> = {
   zh: {
@@ -73,6 +94,12 @@ const textMap: Record<Lang, Localized> = {
     actionHint: '可以直接拍照（电脑/手机摄像头）或从本地上传。',
     takePhotoButton: '拍照识别',
     uploadButton: '上传图片',
+    pasteHint: '支持直接粘贴截图（Ctrl/Cmd + V）或输入图片 URL。',
+    urlPlaceholder: '粘贴图片 URL（https://...）',
+    loadUrlButton: '导入 URL 图片',
+    urlInvalid: '请输入有效的图片 URL（http/https，且扩展名为 jpg/png/webp/gif 等）。',
+    urlLoadFailed: 'URL 图片加载失败，请检查链接是否可访问。',
+    pasteNoImage: '剪贴板中未检测到图片，请复制图片后重试。',
     previewTitle: '图片预览',
     previewEmpty: '尚未选择图片。',
     selectedFile: '已选择',
@@ -88,17 +115,28 @@ const textMap: Record<Lang, Localized> = {
       '结果仅供参考，请结合当地分类标准。',
     ],
     predictionError: '识别时出现错误，请稍后重试。',
+    cameraLoading: '正在打开摄像头...',
+    cameraOpenFailed: '无法打开摄像头。',
+    cameraUnsupported: '当前环境不支持摄像头调用，已切换为拍照上传。',
+    cameraSecureContext: '浏览器限制：请使用 HTTPS 或 localhost 才能调用摄像头。',
+    cameraPermissionDenied: '摄像头权限被拒绝，请在浏览器设置中允许后重试。',
+    cameraNoDevice: '未检测到可用摄像头，请检查设备连接。',
+    cameraInUse: '摄像头可能被其他应用占用，请先关闭其它应用。',
+    closeButton: '关闭',
+    switchCameraButton: '切换摄像头',
     labels: {
-      Plastic: '塑料',
-      Paper: '纸类',
-      Metal: '金属',
+      'General waste': '一般垃圾',
       'Food waste': '厨余垃圾',
+      Recyclables: '可回收垃圾',
+      'Hazardous waste': '有害垃圾',
+      'Bulk waste': '大件垃圾',
     },
     descriptions: {
-      Plastic: '清洗干净，沥干后投放可回收物。',
-      Paper: '保持干燥，去除胶带或塑封后回收。',
-      Metal: '尽量压扁，锋利边缘注意安全。',
+      'General waste': '无法回收或难以分类的生活废弃物，投入一般垃圾桶。',
       'Food waste': '沥干水分，去除塑料袋后投入厨余桶。',
+      Recyclables: '保持清洁干燥后分类投放到可回收物。',
+      'Hazardous waste': '如电池、灯管、药品等，请投放至有害垃圾回收点。',
+      'Bulk waste': '家具家电等大件废弃物，请按当地预约清运流程处理。',
     },
   },
   ko: {
@@ -122,6 +160,12 @@ const textMap: Record<Lang, Localized> = {
     actionHint: '카메라 촬영(PC/모바일) 또는 파일 업로드가 가능합니다.',
     takePhotoButton: '사진 촬영',
     uploadButton: '이미지 업로드',
+    pasteHint: '스크린샷 붙여넣기(Ctrl/Cmd + V) 또는 이미지 URL 입력을 지원합니다.',
+    urlPlaceholder: '이미지 URL 붙여넣기 (https://...)',
+    loadUrlButton: 'URL 이미지 불러오기',
+    urlInvalid: '유효한 이미지 URL(http/https, jpg/png/webp/gif 등)을 입력하세요.',
+    urlLoadFailed: 'URL 이미지 로딩에 실패했습니다. 링크를 확인해주세요.',
+    pasteNoImage: '클립보드에서 이미지를 찾지 못했습니다. 이미지를 복사 후 다시 시도하세요.',
     previewTitle: '미리보기',
     previewEmpty: '선택된 이미지가 없습니다.',
     selectedFile: '선택한 파일',
@@ -137,17 +181,28 @@ const textMap: Record<Lang, Localized> = {
       '지역별 분리배출 기준을 함께 참고하세요.',
     ],
     predictionError: '분석 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.',
+    cameraLoading: '카메라를 여는 중...',
+    cameraOpenFailed: '카메라를 열 수 없습니다.',
+    cameraUnsupported: '현재 환경에서 카메라를 지원하지 않아 파일 촬영으로 전환했습니다.',
+    cameraSecureContext: '브라우저 제한: HTTPS 또는 localhost에서만 카메라를 사용할 수 있습니다.',
+    cameraPermissionDenied: '카메라 권한이 거부되었습니다. 브라우저 설정에서 허용해주세요.',
+    cameraNoDevice: '사용 가능한 카메라를 찾지 못했습니다.',
+    cameraInUse: '다른 앱이 카메라를 사용 중일 수 있습니다.',
+    closeButton: '닫기',
+    switchCameraButton: '카메라 전환',
     labels: {
-      Plastic: '플라스틱',
-      Paper: '종이',
-      Metal: '금속',
-      'Food waste': '음식물쓰레기',
+      'General waste': '일반 쓰레기',
+      'Food waste': '음식물 쓰레기',
+      Recyclables: '재활용 쓰레기',
+      'Hazardous waste': '유해 쓰레기',
+      'Bulk waste': '대형 폐기물',
     },
     descriptions: {
-      Plastic: '깨끗이 헹궈 물기를 제거한 뒤 재활용으로 배출.',
-      Paper: '마른 상태로 테이프/코팅을 제거하고 배출.',
-      Metal: '가능하면 눌러 부피를 줄이고, 날카로운 부분 주의.',
-      'Food waste': '물기를 빼고 비닐을 제거한 뒤 음식물 전용통에.',
+      'General waste': '재활용이 어렵거나 분류가 애매한 생활폐기물은 일반 쓰레기로 배출.',
+      'Food waste': '물기를 제거하고 이물질을 뺀 뒤 음식물 전용 수거함에 배출.',
+      Recyclables: '깨끗이 분리해 재활용 수거함에 배출하세요.',
+      'Hazardous waste': '건전지, 형광등, 의약품 등은 유해폐기물 전용 수거함에 배출.',
+      'Bulk waste': '가구·가전 등 대형 폐기물은 지자체 신고/예약 후 배출.',
     },
   },
 }
@@ -161,6 +216,7 @@ export default function Page() {
   const [isPredicting, setIsPredicting] = useState(false)
 
   const [imageUrl, setImageUrl] = useState('')
+  const [remoteImageUrl, setRemoteImageUrl] = useState('')
   const [fileName, setFileName] = useState('')
   const [mainResult, setMainResult] = useState<PredictionItem | null>(null)
   const [topPredictions, setTopPredictions] = useState<PredictionItem[]>([])
@@ -174,6 +230,8 @@ export default function Page() {
   const streamRef = useRef<MediaStream | null>(null)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [cameraError, setCameraError] = useState('')
+  const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment')
+  const [isOpeningCamera, setIsOpeningCamera] = useState(false)
 
   const supportsCamera =
     typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
@@ -200,33 +258,83 @@ export default function Page() {
     }
   }, [])
 
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items
+      if (!items?.length) return
+
+      const imageItem = Array.from(items).find((item) => item.type.startsWith('image/'))
+      if (!imageItem) return
+
+      const file = imageItem.getAsFile()
+      if (!file) {
+        setPredictionError(t.pasteNoImage)
+        return
+      }
+
+      e.preventDefault()
+      const url = URL.createObjectURL(file)
+      setPredictionError('')
+      setMainResult(null)
+      setImageUrl(url)
+      setFileName(file.name || 'clipboard-image.png')
+      void runPredictFromUrl(url)
+    }
+
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [t.pasteNoImage])
+
   function stopCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
     setIsCameraOpen(false)
+    setIsOpeningCamera(false)
   }
 
-  async function openCamera() {
+  async function openCamera(nextFacingMode: 'environment' | 'user' = cameraFacingMode) {
     setCameraError('')
     if (!supportsCamera) {
       // Fallback to mobile file input capture or upload
+      setCameraError(t.cameraUnsupported)
       takePhotoInputRef.current?.click()
       return
     }
+    if (!window.isSecureContext) {
+      setCameraError(t.cameraSecureContext)
+      takePhotoInputRef.current?.click()
+      return
+    }
+
+    stopCamera()
+    setIsCameraOpen(true)
+    setIsOpeningCamera(true)
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: { ideal: nextFacingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       })
       streamRef.current = stream
+      setCameraFacingMode(nextFacingMode)
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         await videoRef.current.play()
       }
-      setIsCameraOpen(true)
     } catch (err) {
-      setCameraError((err as Error)?.message || '无法打开摄像头。')
+      setCameraError(getCameraErrorMessage(err, t))
+      setIsCameraOpen(false)
+    } finally {
+      setIsOpeningCamera(false)
     }
+  }
+
+  async function switchCamera() {
+    const nextFacingMode = cameraFacingMode === 'environment' ? 'user' : 'environment'
+    await openCamera(nextFacingMode)
   }
 
   async function captureFromCamera() {
@@ -278,6 +386,25 @@ export default function Page() {
       setPredictionError((err as Error)?.message || t.predictionError)
     } finally {
       setIsPredicting(false)
+    }
+  }
+
+  async function loadFromImageUrl() {
+    const target = remoteImageUrl.trim()
+    if (!isLikelyImageUrl(target)) {
+      setPredictionError(t.urlInvalid)
+      return
+    }
+
+    setPredictionError('')
+    setMainResult(null)
+    setImageUrl(target)
+    setFileName('remote-image')
+
+    try {
+      await runPredictFromUrl(target)
+    } catch {
+      setPredictionError(t.urlLoadFailed)
     }
   }
 
@@ -443,17 +570,56 @@ export default function Page() {
         </section>
       </section>
 
+      {!isCameraOpen && cameraError ? <p className="error-text camera-inline-error">{cameraError}</p> : null}
+
       {isCameraOpen ? (
         <div className="camera-overlay" role="dialog" aria-modal>
-          <div className="camera-box card">
-            <video ref={videoRef} className="camera-video" playsInline muted />
+          <div className="camera-box">
+            <div className="camera-head">
+              <button className="camera-ghost-btn" onClick={stopCamera} type="button">
+                {t.closeButton}
+              </button>
+              <button className="camera-ghost-btn" onClick={switchCamera} type="button" disabled={isOpeningCamera}>
+                {t.switchCameraButton}
+              </button>
+            </div>
+            <video ref={videoRef} className="camera-video" playsInline muted autoPlay />
+            {isOpeningCamera ? <p className="camera-hint">{t.cameraLoading}</p> : null}
             {cameraError ? <p className="error-text">{cameraError}</p> : null}
             <div className="camera-controls">
-              <button className="secondary-button" onClick={captureFromCamera} type="button">
-                {t.takePhotoButton}
+              <button
+                className="camera-shutter-btn"
+                onClick={captureFromCamera}
+                type="button"
+                disabled={isOpeningCamera || !!cameraError}
+                aria-label={t.takePhotoButton}
+              >
+                <span />
               </button>
-              <button className="danger-button" onClick={stopCamera} type="button">关闭</button>
+              <button className="secondary-button camera-close-btn" onClick={stopCamera} type="button">
+                {t.closeButton}
+              </button>
             </div>
+          </div>
+
+          <p className="helper-line">{t.pasteHint}</p>
+          <div className="url-import-row">
+            <input
+              className="url-input"
+              type="url"
+              value={remoteImageUrl}
+              onChange={(e) => setRemoteImageUrl(e.target.value)}
+              placeholder={t.urlPlaceholder}
+              disabled={modelStatus !== 'ready'}
+            />
+            <button
+              className="secondary-button"
+              onClick={loadFromImageUrl}
+              disabled={modelStatus !== 'ready'}
+              type="button"
+            >
+              {t.loadUrlButton}
+            </button>
           </div>
         </div>
       ) : null}
@@ -518,9 +684,33 @@ async function predictTop3(model: tf.LayersModel, source: HTMLImageElement): Pro
 
   return scores
     .map((confidence, index) => ({
-      label: supportedLabels[index] ?? 'Plastic',
+      label: supportedLabels[index] ?? 'General waste',
       confidence,
     }))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
+}
+
+function getCameraErrorMessage(err: unknown, t: Localized) {
+  const name = (err as DOMException | Error | undefined)?.name
+
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') return t.cameraPermissionDenied
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return t.cameraNoDevice
+  if (name === 'NotReadableError' || name === 'TrackStartError') return t.cameraInUse
+  if (name === 'SecurityError') return t.cameraSecureContext
+
+  return (err as Error | undefined)?.message || t.cameraOpenFailed
+}
+
+function isLikelyImageUrl(value: string) {
+  if (!value) return false
+
+  try {
+    const url = new URL(value)
+    const isHttp = url.protocol === 'http:' || url.protocol === 'https:'
+    if (!isHttp) return false
+    return /(\.jpg|\.jpeg|\.png|\.webp|\.gif|\.bmp|\.svg)(\?.*)?$/i.test(url.pathname + url.search)
+  } catch {
+    return false
+  }
 }
