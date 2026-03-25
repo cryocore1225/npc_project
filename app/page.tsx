@@ -59,6 +59,8 @@ type Localized = {
   uploadFromClipboard: string
   pasteZoneHint: string
   pasteButton: string
+  retakeButton: string
+  usePhotoButton: string
   clipboardUnsupported: string
   pasteHint: string
   urlPlaceholder: string
@@ -150,6 +152,8 @@ const textMap: Record<Lang, Localized> = {
     uploadFromClipboard: '截图粘贴',
     pasteZoneHint: '先截图并复制，然后在此模式按 Ctrl/Cmd + V。',
     pasteButton: '读取剪贴板图片',
+    retakeButton: '重拍',
+    usePhotoButton: '使用照片',
     clipboardUnsupported: '当前浏览器不支持主动读取剪贴板，请使用 Ctrl/Cmd + V 粘贴。',
     pasteHint: '支持直接粘贴截图（Ctrl/Cmd + V）或输入图片 URL。',
     urlPlaceholder: '粘贴图片 URL（https://...）',
@@ -251,6 +255,8 @@ const textMap: Record<Lang, Localized> = {
     uploadFromClipboard: '스크린샷 붙여넣기',
     pasteZoneHint: '스크린샷을 복사한 뒤 이 모드에서 Ctrl/Cmd + V를 누르세요.',
     pasteButton: '클립보드 이미지 읽기',
+    retakeButton: '다시 촬영',
+    usePhotoButton: '사진 사용',
     clipboardUnsupported: '브라우저에서 클립보드 읽기를 지원하지 않습니다. Ctrl/Cmd + V를 사용하세요.',
     pasteHint: '스크린샷 붙여넣기(Ctrl/Cmd + V) 또는 이미지 URL 입력을 지원합니다.',
     urlPlaceholder: '이미지 URL 붙여넣기 (https://...)',
@@ -337,6 +343,7 @@ export default function Page() {
   const [remoteImageUrl, setRemoteImageUrl] = useState('')
   const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false)
   const [uploadSource, setUploadSource] = useState<UploadSource>('local')
+  const [capturedPreviewUrl, setCapturedPreviewUrl] = useState('')
   const [fileName, setFileName] = useState('')
   const [mainResult, setMainResult] = useState<PredictionItem | null>(null)
   const [topPredictions, setTopPredictions] = useState<PredictionItem[]>([])
@@ -443,6 +450,7 @@ export default function Page() {
     }
     setIsCameraOpen(false)
     setIsOpeningCamera(false)
+    setCapturedPreviewUrl('')
   }, [])
 
   useEffect(() => {
@@ -514,6 +522,7 @@ export default function Page() {
   }
 
   async function switchCamera() {
+    if (capturedPreviewUrl) return
     const nextFacingMode = cameraFacingMode === 'environment' ? 'user' : 'environment'
     await openCamera(nextFacingMode)
   }
@@ -538,11 +547,22 @@ export default function Page() {
     if (!blob) return
 
     const url = URL.createObjectURL(blob)
-    setImageUrl(url)
-    setFileName('camera.jpg')
+    setCapturedPreviewUrl(url)
+  }
 
+  function retakeCapturedPhoto() {
+    if (capturedPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(capturedPreviewUrl)
+    }
+    setCapturedPreviewUrl('')
+  }
+
+  async function useCapturedPhoto() {
+    if (!capturedPreviewUrl) return
+    setImageUrl(capturedPreviewUrl)
+    setFileName('camera.jpg')
     stopCamera()
-    await runPredictFromUrl(url)
+    await runPredictFromUrl(capturedPreviewUrl)
   }
 
   async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
@@ -612,7 +632,16 @@ export default function Page() {
 
   function openUploadPanel() {
     setPredictionError('')
-    setIsUploadPanelOpen((prev) => !prev)
+    setIsUploadPanelOpen(true)
+  }
+
+  function closeUploadPanel() {
+    setIsUploadPanelOpen(false)
+  }
+
+  function chooseLocalFile() {
+    setIsUploadPanelOpen(false)
+    uploadInputRef.current?.click()
   }
 
   return (
@@ -687,71 +716,6 @@ export default function Page() {
                 {t.uploadButton}
             </button>
           </div>
-
-          {isUploadPanelOpen ? (
-            <div className="upload-panel">
-              <p className="upload-panel-title">{t.uploadPickerTitle}</p>
-              <div className="upload-source-tabs">
-                <button
-                  className={`upload-source-tab ${uploadSource === 'local' ? 'active' : ''}`}
-                  onClick={() => setUploadSource('local')}
-                  type="button"
-                >
-                  {t.uploadFromLocal}
-                </button>
-                <button
-                  className={`upload-source-tab ${uploadSource === 'url' ? 'active' : ''}`}
-                  onClick={() => setUploadSource('url')}
-                  type="button"
-                >
-                  {t.uploadFromUrl}
-                </button>
-                <button
-                  className={`upload-source-tab ${uploadSource === 'clipboard' ? 'active' : ''}`}
-                  onClick={() => setUploadSource('clipboard')}
-                  type="button"
-                >
-                  {t.uploadFromClipboard}
-                </button>
-              </div>
-
-              {uploadSource === 'local' ? (
-                <button className="secondary-button" onClick={() => uploadInputRef.current?.click()} type="button">
-                  {t.uploadFromLocal}
-                </button>
-              ) : null}
-
-              {uploadSource === 'url' ? (
-                <div className="url-import-row">
-                  <input
-                    className="url-input"
-                    type="url"
-                    value={remoteImageUrl}
-                    onChange={(e) => setRemoteImageUrl(e.target.value)}
-                    placeholder={t.urlPlaceholder}
-                    disabled={modelStatus === 'loading'}
-                  />
-                  <button
-                    className="secondary-button"
-                    onClick={loadFromImageUrl}
-                    disabled={modelStatus === 'loading'}
-                    type="button"
-                  >
-                    {t.loadUrlButton}
-                  </button>
-                </div>
-              ) : null}
-
-              {uploadSource === 'clipboard' ? (
-                <div className="paste-zone">
-                  <p className="helper-line">{t.pasteZoneHint}</p>
-                  <button className="secondary-button" onClick={loadFromClipboard} type="button">
-                    {t.pasteButton}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
 
           <input
             ref={takePhotoInputRef}
@@ -922,7 +886,7 @@ export default function Page() {
                 className="camera-icon-btn"
                 onClick={switchCamera}
                 type="button"
-                disabled={isOpeningCamera}
+                disabled={isOpeningCamera || !!capturedPreviewUrl}
                 aria-label={t.switchCameraButton}
                 title={t.switchCameraButton}
               >
@@ -941,22 +905,102 @@ export default function Page() {
               muted
               autoPlay
             />
+            {capturedPreviewUrl ? <img className="camera-captured-preview" src={capturedPreviewUrl} alt="Captured preview" /> : null}
             {isOpeningCamera ? <p className="camera-hint">{t.cameraLoading}</p> : null}
             {cameraFacingMode === 'user' ? <p className="camera-hint camera-mirror-hint">{t.mirrorHint}</p> : null}
             {cameraError ? <p className="error-text">{cameraError}</p> : null}
             <div className="camera-controls">
-              <button
-                className="camera-shutter-btn"
-                onClick={captureFromCamera}
-                type="button"
-                disabled={isOpeningCamera || !!cameraError}
-                aria-label={t.takePhotoButton}
-              >
-                <span />
-              </button>
+              {capturedPreviewUrl ? (
+                <div className="camera-confirm-actions">
+                  <button className="secondary-button" onClick={retakeCapturedPhoto} type="button">
+                    {t.retakeButton}
+                  </button>
+                  <button className="primary-button" onClick={useCapturedPhoto} type="button">
+                    {t.usePhotoButton}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="camera-shutter-btn"
+                  onClick={captureFromCamera}
+                  type="button"
+                  disabled={isOpeningCamera || !!cameraError}
+                  aria-label={t.takePhotoButton}
+                >
+                  <span />
+                </button>
+              )}
             </div>
           </div>
 
+        </div>
+      ) : null}
+
+      {isUploadPanelOpen ? (
+        <div className="upload-sheet-overlay" onClick={closeUploadPanel} role="dialog" aria-modal>
+          <div className="upload-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="upload-sheet-handle" />
+            <p className="upload-panel-title">{t.uploadPickerTitle}</p>
+            <div className="upload-source-tabs">
+              <button
+                className={`upload-source-tab ${uploadSource === 'local' ? 'active' : ''}`}
+                onClick={() => setUploadSource('local')}
+                type="button"
+              >
+                {t.uploadFromLocal}
+              </button>
+              <button
+                className={`upload-source-tab ${uploadSource === 'url' ? 'active' : ''}`}
+                onClick={() => setUploadSource('url')}
+                type="button"
+              >
+                {t.uploadFromUrl}
+              </button>
+              <button
+                className={`upload-source-tab ${uploadSource === 'clipboard' ? 'active' : ''}`}
+                onClick={() => setUploadSource('clipboard')}
+                type="button"
+              >
+                {t.uploadFromClipboard}
+              </button>
+            </div>
+
+            {uploadSource === 'local' ? (
+              <button className="secondary-button upload-sheet-btn" onClick={chooseLocalFile} type="button">
+                {t.uploadFromLocal}
+              </button>
+            ) : null}
+
+            {uploadSource === 'url' ? (
+              <div className="url-import-row">
+                <input
+                  className="url-input"
+                  type="url"
+                  value={remoteImageUrl}
+                  onChange={(e) => setRemoteImageUrl(e.target.value)}
+                  placeholder={t.urlPlaceholder}
+                  disabled={modelStatus === 'loading'}
+                />
+                <button
+                  className="secondary-button"
+                  onClick={loadFromImageUrl}
+                  disabled={modelStatus === 'loading'}
+                  type="button"
+                >
+                  {t.loadUrlButton}
+                </button>
+              </div>
+            ) : null}
+
+            {uploadSource === 'clipboard' ? (
+              <div className="paste-zone">
+                <p className="helper-line">{t.pasteZoneHint}</p>
+                <button className="secondary-button upload-sheet-btn" onClick={loadFromClipboard} type="button">
+                  {t.pasteButton}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </main>

@@ -249,6 +249,37 @@ button:disabled {
   font-size: 0.92rem;
 }
 
+.upload-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.38);
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+}
+
+.upload-sheet {
+  width: 100%;
+  border-radius: 20px 20px 0 0;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  background: var(--surface-strong);
+  padding: 10px 16px max(env(safe-area-inset-bottom), 16px);
+  box-shadow: 0 -12px 28px rgba(31, 26, 20, 0.16);
+}
+
+.upload-sheet-handle {
+  width: 56px;
+  height: 6px;
+  border-radius: 999px;
+  margin: 0 auto 10px;
+  background: rgba(31, 26, 20, 0.2);
+}
+
+.upload-sheet-btn {
+  width: 100%;
+}
+
 .upload-source-tabs {
   margin: 10px 0 12px;
   display: flex;
@@ -607,6 +638,15 @@ button:disabled {
   background: #000;
 }
 
+.camera-captured-preview {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  z-index: 1;
+}
+
 .camera-video-front {
   transform: scaleX(-1);
 }
@@ -633,6 +673,11 @@ button:disabled {
   align-items: center;
   position: relative;
   z-index: 2;
+}
+
+.camera-confirm-actions {
+  display: flex;
+  gap: 12px;
 }
 
 .camera-shutter-btn {
