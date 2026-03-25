@@ -2,18 +2,15 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { adminTextMap } from '../i18n/adminText'
+import {
+  LANG_STORAGE_KEY,
+  LOG_STORAGE_KEY,
+  type Lang,
+  type LabelKey,
+  type ObjectClassKey,
+} from '../i18n/shared'
 
-type Lang = 'zh' | 'ko'
-type LabelKey = 'General waste' | 'Food waste' | 'Recyclables' | 'Hazardous waste' | 'Bulk waste'
-type ObjectClassKey =
-  | 'can'
-  | 'bottle'
-  | 'food'
-  | 'battery'
-  | 'paper'
-  | 'plastic'
-  | 'furniture'
-  | 'background'
 type InputSource = 'local' | 'url' | 'clipboard' | 'camera'
 type InferenceLog = {
   id: string
@@ -26,77 +23,12 @@ type InferenceLog = {
   rawTopClass: ObjectClassKey | null
 }
 
-const LOG_STORAGE_KEY = 'npc_inference_logs_v1'
-const LANG_STORAGE_KEY = 'npc_lang'
-
-const textMap: Record<
-  Lang,
-  {
-    title: string
-    subtitle: string
-    refresh: string
-    backHome: string
-    exportCsv: string
-    total: string
-    lowConfidenceRate: string
-    avgLatency: string
-    source: string
-    onlyUndetermined: string
-    tableTime: string
-    tableSource: string
-    tableTop1: string
-    tableRawTop1: string
-    tableConfidence: string
-    tableLatency: string
-    tableStatus: string
-  }
-> = {
-  zh: {
-    title: '管理日志',
-    subtitle: '推理埋点统计（浏览器 localStorage）。',
-    refresh: '刷新',
-    backHome: '返回首页',
-    exportCsv: '导出 CSV',
-    total: '总请求',
-    lowConfidenceRate: '低置信度占比',
-    avgLatency: '平均耗时',
-    source: '来源',
-    onlyUndetermined: '只看 undetermined',
-    tableTime: '时间',
-    tableSource: '来源',
-    tableTop1: 'Top1',
-    tableRawTop1: '原始 Top1',
-    tableConfidence: '置信度',
-    tableLatency: '耗时',
-    tableStatus: '状态',
-  },
-  ko: {
-    title: '관리 로그',
-    subtitle: '추론 로그 통계(브라우저 localStorage).',
-    refresh: '새로고침',
-    backHome: '홈으로',
-    exportCsv: 'CSV 내보내기',
-    total: '총 요청',
-    lowConfidenceRate: '저신뢰 비율',
-    avgLatency: '평균 지연',
-    source: '소스',
-    onlyUndetermined: 'undetermined만 보기',
-    tableTime: '시간',
-    tableSource: '소스',
-    tableTop1: 'Top1',
-    tableRawTop1: '원본 Top1',
-    tableConfidence: '신뢰도',
-    tableLatency: '지연',
-    tableStatus: '상태',
-  },
-}
-
 export default function AdminPage() {
   const [lang] = useState<Lang>(() => {
     if (typeof window === 'undefined') return 'zh'
     return localStorage.getItem(LANG_STORAGE_KEY) === 'ko' ? 'ko' : 'zh'
   })
-  const t = textMap[lang]
+  const t = adminTextMap[lang]
   const [sourceFilter, setSourceFilter] = useState<InputSource | 'all'>('all')
   const [onlyUndetermined, setOnlyUndetermined] = useState(false)
 
@@ -114,6 +46,12 @@ export default function AdminPage() {
 
   function loadLogs() {
     setLogs(readLogs())
+  }
+
+  function clearLogs() {
+    if (!window.confirm(t.clearConfirm)) return
+    localStorage.removeItem(LOG_STORAGE_KEY)
+    setLogs([])
   }
 
   const filteredLogs = logs.filter((item) => {
@@ -179,6 +117,9 @@ export default function AdminPage() {
           <div className="admin-actions">
             <button className="secondary-button" onClick={loadLogs} type="button">
               {t.refresh}
+            </button>
+            <button className="secondary-button" onClick={clearLogs} type="button">
+              {t.clearLogs}
             </button>
             <button className="secondary-button" onClick={exportCsv} type="button">
               {t.exportCsv}
