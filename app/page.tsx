@@ -8,6 +8,15 @@ type ModelStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'error'
 type UploadSource = 'local' | 'url' | 'clipboard'
 type TfModule = typeof import('@tensorflow/tfjs')
 type TfLayersModel = import('@tensorflow/tfjs').LayersModel
+type ObjectClassKey =
+  | 'can'
+  | 'bottle'
+  | 'food'
+  | 'battery'
+  | 'paper'
+  | 'plastic'
+  | 'furniture'
+  | 'background'
 
 type PredictionItem = {
   label: LabelKey
@@ -82,6 +91,16 @@ const supportedLabels: LabelKey[] = [
   'Hazardous waste',
   'Bulk waste',
 ]
+const supportedObjectClasses: ObjectClassKey[] = [
+  'can',
+  'bottle',
+  'food',
+  'battery',
+  'paper',
+  'plastic',
+  'furniture',
+  'background',
+]
 
 const textMap: Record<Lang, Localized> = {
   zh: {
@@ -101,7 +120,7 @@ const textMap: Record<Lang, Localized> = {
     statusReadyHint: '选择或拍摄一张图片，系统会给出 Top 3 结果。',
     statusMissing: '未找到模型文件。',
     statusMissingHint:
-      '请把从 Teachable Machine 导出的 model.json 放到 public/model/ 目录。',
+      '请将训练导出的 model.json 与 weights.bin 放到 public/model/ 目录。',
     statusError: '模型加载失败。',
     statusErrorHint: '请检查网络连接或模型文件是否完整，然后重试。',
     actionsTitle: '开始操作',
@@ -177,7 +196,7 @@ const textMap: Record<Lang, Localized> = {
     statusReadyHint: '사진을 선택하거나 촬영하면 Top 3 결과를 보여드립니다.',
     statusMissing: '모델 파일을 찾을 수 없습니다.',
     statusMissingHint:
-      'Teachable Machine에서 내보낸 model.json을 public/model/ 폴더에 넣어주세요.',
+      '학습된 model.json과 weights.bin 파일을 public/model/ 폴더에 배치하세요.',
     statusError: '모델 로딩에 실패했습니다.',
     statusErrorHint: '네트워크 또는 모델 파일을 확인한 뒤 다시 시도하세요.',
     actionsTitle: '시작하기',
@@ -263,6 +282,7 @@ export default function Page() {
   // Camera (desktop) support
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const cameraHistoryEntryRef = useRef(false)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment')
@@ -315,10 +335,6 @@ export default function Page() {
   )
 
   useEffect(() => {
-    return () => stopCamera()
-  }, [])
-
-  useEffect(() => {
     if (!isUploadPanelOpen || uploadSource !== 'clipboard') return
 
     function onPaste(e: ClipboardEvent) {
@@ -347,7 +363,7 @@ export default function Page() {
     return () => window.removeEventListener('paste', onPaste)
   }, [isUploadPanelOpen, runPredictFromUrl, t.pasteNoImage, uploadSource])
 
-  function stopCamera() {
+  const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
     if (videoRef.current) {
@@ -355,7 +371,38 @@ export default function Page() {
     }
     setIsCameraOpen(false)
     setIsOpeningCamera(false)
-  }
+  }, [])
+
+  useEffect(() => {
+    return () => stopCamera()
+  }, [stopCamera])
+
+  const closeCamera = useCallback(() => {
+    stopCamera()
+    if (cameraHistoryEntryRef.current && window.history.state?.__cameraOverlay) {
+      cameraHistoryEntryRef.current = false
+      window.history.back()
+    }
+  }, [stopCamera])
+
+  useEffect(() => {
+    if (!isCameraOpen) return
+
+    if (!cameraHistoryEntryRef.current) {
+      window.history.pushState({ ...(window.history.state ?? {}), __cameraOverlay: true }, '')
+      cameraHistoryEntryRef.current = true
+    }
+
+    function onPopState() {
+      if (isCameraOpen) {
+        stopCamera()
+        cameraHistoryEntryRef.current = false
+      }
+    }
+
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [isCameraOpen, stopCamera])
 
   async function openCamera(nextFacingMode: 'environment' | 'user' = cameraFacingMode) {
     setCameraError('')
@@ -730,12 +777,15 @@ export default function Page() {
             <div className="camera-head">
               <button
                 className="camera-icon-btn"
-                onClick={stopCamera}
+                onClick={closeCamera}
                 type="button"
                 aria-label={t.closeButton}
                 title={t.closeButton}
               >
-                ×
+                <svg className="camera-icon-glyph" viewBox="0 0 24 24" aria-hidden>
+                  <path d="M6 6L18 18" />
+                  <path d="M18 6L6 18" />
+                </svg>
               </button>
               <button
                 className="camera-icon-btn"
@@ -745,7 +795,12 @@ export default function Page() {
                 aria-label={t.switchCameraButton}
                 title={t.switchCameraButton}
               >
-                ↻
+                <svg className="camera-icon-glyph" viewBox="0 0 24 24" aria-hidden>
+                  <path d="M20 11a8 8 0 0 0-14.8-4" />
+                  <path d="M4 4v5h5" />
+                  <path d="M4 13a8 8 0 0 0 14.8 4" />
+                  <path d="M20 20v-5h-5" />
+                </svg>
               </button>
             </div>
             <video
@@ -834,11 +889,50 @@ async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImage
   tensor.dispose()
   output.dispose()
 
-  return scores
-    .map((confidence, index) => ({
-      label: supportedLabels[index] ?? 'General waste',
-      confidence,
-    }))
+  return mapScoresToTrashPredictions(scores)
+}
+
+function mapToTrash(className: string): LabelKey {
+  const normalized = className.trim().toLowerCase()
+
+  if (normalized === 'can' || normalized === 'bottle' || normalized === 'paper' || normalized === 'plastic') {
+    return 'Recyclables'
+  }
+  if (normalized === 'food' || normalized === 'banana') return 'Food waste'
+  if (normalized === 'battery') return 'Hazardous waste'
+  if (normalized === 'furniture' || normalized === 'chair') return 'Bulk waste'
+  return 'General waste'
+}
+
+function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
+  // Case A: model directly outputs 5 trash classes
+  if (scores.length === supportedLabels.length) {
+    return scores
+      .map((confidence, index) => ({
+        label: supportedLabels[index] ?? 'General waste',
+        confidence,
+      }))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 3)
+  }
+
+  // Case B: model outputs object classes (8 classes), then map to trash buckets
+  const bucket: Record<LabelKey, number> = {
+    'General waste': 0,
+    'Food waste': 0,
+    Recyclables: 0,
+    'Hazardous waste': 0,
+    'Bulk waste': 0,
+  }
+
+  scores.forEach((score, index) => {
+    const className = supportedObjectClasses[index] ?? 'background'
+    const trashLabel = mapToTrash(className)
+    bucket[trashLabel] += score
+  })
+
+  return supportedLabels
+    .map((label) => ({ label, confidence: bucket[label] }))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
 }
