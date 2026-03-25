@@ -166,6 +166,23 @@ button:disabled {
   line-height: 1.5;
 }
 
+.model-progress-wrap {
+  margin-top: 10px;
+}
+
+.model-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(31, 26, 20, 0.12);
+  overflow: hidden;
+}
+
+.model-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--primary));
+}
+
 .status-ready {
   border-color: rgba(13, 138, 106, 0.28);
   background: rgba(13, 138, 106, 0.08);
@@ -255,25 +272,35 @@ button:disabled {
   background: rgba(0, 0, 0, 0.38);
   z-index: 90;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: center;
 }
 
 .upload-sheet {
-  width: 100%;
-  border-radius: 20px 20px 0 0;
+  width: min(92vw, 560px);
+  border-radius: 20px;
   border: 1px solid var(--line);
-  border-bottom: 0;
   background: var(--surface-strong);
-  padding: 10px 16px max(env(safe-area-inset-bottom), 16px);
-  box-shadow: 0 -12px 28px rgba(31, 26, 20, 0.16);
+  padding: 14px 16px 16px;
+  box-shadow: 0 12px 28px rgba(31, 26, 20, 0.2);
 }
 
-.upload-sheet-handle {
-  width: 56px;
-  height: 6px;
+.upload-sheet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-sheet-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  margin: 0 auto 10px;
-  background: rgba(31, 26, 20, 0.2);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
 }
 
 .upload-sheet-btn {
@@ -384,7 +411,7 @@ button:disabled {
   margin-top: 22px;
   border-radius: 24px;
   border: 1px solid var(--line);
-  object-fit: cover;
+  object-fit: contain;
   background: rgba(255, 255, 255, 0.7);
 }
 
@@ -537,6 +564,32 @@ button:disabled {
 
 .camera-inline-error {
   margin: 16px 0 0;
+}
+
+.alert-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(0, 0, 0, 0.42);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.alert-modal {
+  width: min(92vw, 420px);
+  padding: 20px;
+}
+
+.alert-modal h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.alert-modal p {
+  margin: 12px 0 16px;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 @media (max-width: 980px) {

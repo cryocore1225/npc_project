@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
+import Image from 'next/image'
 
 type Lang = 'zh' | 'ko'
 type LabelKey = 'General waste' | 'Food waste' | 'Recyclables' | 'Hazardous waste' | 'Bulk waste'
@@ -30,6 +31,21 @@ type PredictionAnalysis = {
   mappedTop3: PredictionItem[]
   rawTop3: RawPredictionItem[]
   isUndetermined: boolean
+}
+type PreviewMeta = {
+  width: number
+  height: number
+}
+type InputSource = UploadSource | 'camera'
+type InferenceLog = {
+  id: string
+  timestamp: number
+  source: InputSource
+  latencyMs: number
+  topLabel: LabelKey | null
+  topConfidence: number
+  undetermined: boolean
+  rawTopClass: ObjectClassKey | null
 }
 
 type Localized = {
@@ -71,6 +87,7 @@ type Localized = {
   previewTitle: string
   previewEmpty: string
   selectedFile: string
+  resolutionLabel: string
   analyzing: string
   resultTitle: string
   confidence: string
@@ -91,6 +108,7 @@ type Localized = {
   cameraPermissionDenied: string
   cameraNoDevice: string
   cameraInUse: string
+  cameraErrorTitle: string
   closeButton: string
   switchCameraButton: string
   mirrorHint: string
@@ -101,8 +119,12 @@ type Localized = {
 }
 
 const MODEL_PATH = '/model/model.json'
+const MODEL_VERSION = 'model-v2'
+const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
+const LOG_STORAGE_KEY = 'npc_inference_logs_v1'
+const LOG_LIMIT = 200
 const supportedLabels: LabelKey[] = [
   'General waste',
   'Food waste',
@@ -164,6 +186,7 @@ const textMap: Record<Lang, Localized> = {
     previewTitle: '图片预览',
     previewEmpty: '尚未选择图片。',
     selectedFile: '已选择',
+    resolutionLabel: '分辨率',
     analyzing: '正在分析图片...',
     resultTitle: '识别结果',
     confidence: '置信度',
@@ -188,6 +211,7 @@ const textMap: Record<Lang, Localized> = {
     cameraPermissionDenied: '摄像头权限被拒绝，请在浏览器设置中允许后重试。',
     cameraNoDevice: '未检测到可用摄像头，请检查设备连接。',
     cameraInUse: '摄像头可能被其他应用占用，请先关闭其它应用。',
+    cameraErrorTitle: '摄像头打开失败',
     closeButton: '关闭',
     switchCameraButton: '切换摄像头',
     mirrorHint: '前置画面已校正为非镜像',
@@ -267,6 +291,7 @@ const textMap: Record<Lang, Localized> = {
     previewTitle: '미리보기',
     previewEmpty: '선택된 이미지가 없습니다.',
     selectedFile: '선택한 파일',
+    resolutionLabel: '해상도',
     analyzing: '이미지 분석 중...',
     resultTitle: '분류 결과',
     confidence: '신뢰도',
@@ -291,6 +316,7 @@ const textMap: Record<Lang, Localized> = {
     cameraPermissionDenied: '카메라 권한이 거부되었습니다. 브라우저 설정에서 허용해주세요.',
     cameraNoDevice: '사용 가능한 카메라를 찾지 못했습니다.',
     cameraInUse: '다른 앱이 카메라를 사용 중일 수 있습니다.',
+    cameraErrorTitle: '카메라 실행 실패',
     closeButton: '닫기',
     switchCameraButton: '카메라 전환',
     mirrorHint: '전면 카메라는 좌우 반전 보정됨',
@@ -344,11 +370,13 @@ export default function Page() {
   const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false)
   const [uploadSource, setUploadSource] = useState<UploadSource>('local')
   const [capturedPreviewUrl, setCapturedPreviewUrl] = useState('')
+  const [previewMeta, setPreviewMeta] = useState<PreviewMeta | null>(null)
   const [fileName, setFileName] = useState('')
   const [mainResult, setMainResult] = useState<PredictionItem | null>(null)
   const [topPredictions, setTopPredictions] = useState<PredictionItem[]>([])
   const [rawTopPredictions, setRawTopPredictions] = useState<RawPredictionItem[]>([])
   const [isUndetermined, setIsUndetermined] = useState(false)
+  const [modelLoadProgress, setModelLoadProgress] = useState(0)
 
   const tfRef = useRef<TfModule | null>(null)
   const modelRef = useRef<TfLayersModel | null>(null)
@@ -374,14 +402,18 @@ export default function Page() {
     }
 
     setModelStatus('loading')
+    setModelLoadProgress(0)
     try {
       const tf = tfRef.current ?? (await import('@tensorflow/tfjs'))
       tfRef.current = tf
       await tf.ready()
 
-      const model = await tf.loadLayersModel(MODEL_PATH)
+      const model = await tf.loadLayersModel(VERSIONED_MODEL_PATH, {
+        onProgress: (fraction) => setModelLoadProgress(Math.round(fraction * 100)),
+      })
       modelRef.current = model
       setModelStatus('ready')
+      setModelLoadProgress(100)
       return true
     } catch (err) {
       const msg = (err as Error)?.message ?? ''
@@ -392,17 +424,33 @@ export default function Page() {
   }, [])
 
   const runPredictFromUrl = useCallback(
-    async (url: string, defaultErrorMessage = t.predictionError) => {
+    async (url: string, source: InputSource, defaultErrorMessage = t.predictionError) => {
       const modelReady = await ensureModelReady()
       if (!modelReady || !modelRef.current || !tfRef.current) return
       setIsPredicting(true)
+      const startedAt = performance.now()
       try {
         const img = await readImage(url)
+        setPreviewMeta({
+          width: img.naturalWidth || img.width,
+          height: img.naturalHeight || img.height,
+        })
         const analysis = await predictTop3(tfRef.current, modelRef.current, img)
         setTopPredictions(analysis.mappedTop3)
         setRawTopPredictions(analysis.rawTop3)
         setIsUndetermined(analysis.isUndetermined)
         setMainResult(analysis.isUndetermined ? null : (analysis.mappedTop3[0] ?? null))
+        const latencyMs = Math.round(performance.now() - startedAt)
+        appendInferenceLog({
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          source,
+          latencyMs,
+          topLabel: analysis.mappedTop3[0]?.label ?? null,
+          topConfidence: analysis.mappedTop3[0]?.confidence ?? 0,
+          undetermined: analysis.isUndetermined,
+          rawTopClass: analysis.rawTop3[0]?.className ?? null,
+        })
       } catch (err) {
         setPredictionError((err as Error)?.message || defaultErrorMessage)
       } finally {
@@ -433,9 +481,10 @@ export default function Page() {
       setPredictionError('')
       setMainResult(null)
       setIsUndetermined(false)
+      setPreviewMeta(null)
       setImageUrl(url)
       setFileName(file.name || 'clipboard-image.png')
-      void runPredictFromUrl(url)
+      void runPredictFromUrl(url, 'clipboard')
     }
 
     window.addEventListener('paste', onPaste)
@@ -562,7 +611,7 @@ export default function Page() {
     setImageUrl(capturedPreviewUrl)
     setFileName('camera.jpg')
     stopCamera()
-    await runPredictFromUrl(capturedPreviewUrl)
+    await runPredictFromUrl(capturedPreviewUrl, 'camera')
   }
 
   async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
@@ -572,13 +621,14 @@ export default function Page() {
     setPredictionError('')
     setMainResult(null)
     setIsUndetermined(false)
+    setPreviewMeta(null)
 
     const url = URL.createObjectURL(file)
     setImageUrl(url)
     setFileName(file.name)
     setIsUploadPanelOpen(false)
 
-    await runPredictFromUrl(url)
+    await runPredictFromUrl(url, 'local')
   }
 
   async function loadFromImageUrl() {
@@ -591,11 +641,12 @@ export default function Page() {
     setPredictionError('')
     setMainResult(null)
     setIsUndetermined(false)
+    setPreviewMeta(null)
     setImageUrl(target)
     setFileName('remote-image')
     setIsUploadPanelOpen(false)
 
-    await runPredictFromUrl(target, t.urlLoadFailed)
+    await runPredictFromUrl(target, 'url', t.urlLoadFailed)
   }
 
   async function loadFromClipboard() {
@@ -621,10 +672,11 @@ export default function Page() {
       setPredictionError('')
       setMainResult(null)
       setIsUndetermined(false)
+      setPreviewMeta(null)
       setImageUrl(url)
       setFileName('clipboard-image.png')
       setIsUploadPanelOpen(false)
-      await runPredictFromUrl(url)
+      await runPredictFromUrl(url, 'clipboard')
     } catch {
       setPredictionError(t.clipboardUnsupported)
     }
@@ -637,6 +689,10 @@ export default function Page() {
 
   function closeUploadPanel() {
     setIsUploadPanelOpen(false)
+  }
+
+  function dismissCameraError() {
+    setCameraError('')
   }
 
   function chooseLocalFile() {
@@ -683,6 +739,14 @@ export default function Page() {
             <div>
               <strong>{getStatusText(modelStatus, t)}</strong>
               <small>{getStatusHint(modelStatus, t)}</small>
+              {modelStatus === 'loading' ? (
+                <div className="model-progress-wrap" aria-label="model loading progress">
+                  <div className="model-progress-track">
+                    <div className="model-progress-fill" style={{ width: `${Math.max(modelLoadProgress, 6)}%` }} />
+                  </div>
+                  <small>{modelLoadProgress}%</small>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -748,11 +812,25 @@ export default function Page() {
         <section className="card preview-card">
           <div className="section-heading">
             <h2>{t.previewTitle}</h2>
-            {fileName ? <p>{t.selectedFile}: {fileName}</p> : <p>{t.previewEmpty}</p>}
+            {fileName ? (
+              <p>
+                {t.selectedFile}: {fileName}
+                {previewMeta ? ` · ${t.resolutionLabel}: ${previewMeta.width}x${previewMeta.height}` : ''}
+              </p>
+            ) : (
+              <p>{t.previewEmpty}</p>
+            )}
           </div>
 
           {imageUrl ? (
-            <img className="preview-image" src={imageUrl} alt="Selected waste item preview" />
+            <Image
+              className="preview-image"
+              src={imageUrl}
+              alt="Selected waste item preview"
+              width={previewMeta?.width ?? 1280}
+              height={previewMeta?.height ?? 960}
+              unoptimized
+            />
           ) : (
             <div className="preview-placeholder">
               <span />
@@ -864,8 +942,6 @@ export default function Page() {
         </section>
       </section>
 
-      {!isCameraOpen && cameraError ? <p className="error-text camera-inline-error">{cameraError}</p> : null}
-
       {isCameraOpen ? (
         <div className="camera-overlay" role="dialog" aria-modal>
           <div className="camera-box">
@@ -905,7 +981,16 @@ export default function Page() {
               muted
               autoPlay
             />
-            {capturedPreviewUrl ? <img className="camera-captured-preview" src={capturedPreviewUrl} alt="Captured preview" /> : null}
+            {capturedPreviewUrl ? (
+              <Image
+                className="camera-captured-preview"
+                src={capturedPreviewUrl}
+                alt="Captured preview"
+                width={1280}
+                height={720}
+                unoptimized
+              />
+            ) : null}
             {isOpeningCamera ? <p className="camera-hint">{t.cameraLoading}</p> : null}
             {cameraFacingMode === 'user' ? <p className="camera-hint camera-mirror-hint">{t.mirrorHint}</p> : null}
             {cameraError ? <p className="error-text">{cameraError}</p> : null}
@@ -939,8 +1024,12 @@ export default function Page() {
       {isUploadPanelOpen ? (
         <div className="upload-sheet-overlay" onClick={closeUploadPanel} role="dialog" aria-modal>
           <div className="upload-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="upload-sheet-handle" />
-            <p className="upload-panel-title">{t.uploadPickerTitle}</p>
+            <div className="upload-sheet-head">
+              <p className="upload-panel-title">{t.uploadPickerTitle}</p>
+              <button className="upload-sheet-close" onClick={closeUploadPanel} type="button" aria-label={t.closeButton}>
+                ×
+              </button>
+            </div>
             <div className="upload-source-tabs">
               <button
                 className={`upload-source-tab ${uploadSource === 'local' ? 'active' : ''}`}
@@ -1000,6 +1089,18 @@ export default function Page() {
                 </button>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {!isCameraOpen && cameraError ? (
+        <div className="alert-overlay" role="dialog" aria-modal>
+          <div className="alert-modal card">
+            <h3>{t.cameraErrorTitle}</h3>
+            <p>{cameraError}</p>
+            <button className="primary-button" onClick={dismissCameraError} type="button">
+              {t.closeButton}
+            </button>
           </div>
         </div>
       ) : null}
@@ -1135,6 +1236,17 @@ function getRawObjectTop3(scores: number[]): RawPredictionItem[] {
 function getPredictionReason(className: ObjectClassKey | undefined, t: Localized) {
   if (!className) return t.undeterminedHint
   return t.reasonHints[className]
+}
+
+function appendInferenceLog(entry: InferenceLog) {
+  try {
+    const raw = localStorage.getItem(LOG_STORAGE_KEY)
+    const parsed = raw ? (JSON.parse(raw) as InferenceLog[]) : []
+    const next = [entry, ...parsed].slice(0, LOG_LIMIT)
+    localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(next))
+  } catch {
+    // Ignore logging failures to avoid blocking prediction flow.
+  }
 }
 
 function getCameraErrorMessage(err: unknown, t: Localized) {
