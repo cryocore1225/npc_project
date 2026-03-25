@@ -28,6 +28,9 @@ type InferenceLog = {
 const LOG_STORAGE_KEY = 'npc_inference_logs_v1'
 
 export default function AdminPage() {
+  const [sourceFilter, setSourceFilter] = useState<InputSource | 'all'>('all')
+  const [onlyUndetermined, setOnlyUndetermined] = useState(false)
+
   function readLogs(): InferenceLog[] {
     if (typeof window === 'undefined') return []
     try {
@@ -44,17 +47,25 @@ export default function AdminPage() {
     setLogs(readLogs())
   }
 
+  const filteredLogs = useMemo(() => {
+    return logs.filter((item) => {
+      if (sourceFilter !== 'all' && item.source !== sourceFilter) return false
+      if (onlyUndetermined && !item.undetermined) return false
+      return true
+    })
+  }, [logs, onlyUndetermined, sourceFilter])
+
   const summary = useMemo(() => {
-    const total = logs.length
+    const total = filteredLogs.length
     if (!total) return { total: 0, lowConfidenceRate: 0, avgLatency: 0 }
-    const low = logs.filter((item) => item.undetermined).length
-    const avgLatency = Math.round(logs.reduce((acc, cur) => acc + cur.latencyMs, 0) / total)
+    const low = filteredLogs.filter((item) => item.undetermined).length
+    const avgLatency = Math.round(filteredLogs.reduce((acc, cur) => acc + cur.latencyMs, 0) / total)
     return {
       total,
       lowConfidenceRate: Math.round((low / total) * 100),
       avgLatency,
     }
-  }, [logs])
+  }, [filteredLogs])
 
   return (
     <main className="page-shell">
@@ -89,6 +100,31 @@ export default function AdminPage() {
           </div>
         </div>
 
+        <div className="admin-filters">
+          <label className="admin-filter-item">
+            来源
+            <select
+              className="admin-select"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as InputSource | 'all')}
+            >
+              <option value="all">all</option>
+              <option value="camera">camera</option>
+              <option value="local">local</option>
+              <option value="url">url</option>
+              <option value="clipboard">clipboard</option>
+            </select>
+          </label>
+          <label className="admin-filter-check">
+            <input
+              type="checkbox"
+              checked={onlyUndetermined}
+              onChange={(e) => setOnlyUndetermined(e.target.checked)}
+            />
+            只看 undetermined
+          </label>
+        </div>
+
         <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
@@ -103,7 +139,7 @@ export default function AdminPage() {
               </tr>
             </thead>
             <tbody>
-              {logs.map((item) => (
+              {filteredLogs.map((item) => (
                 <tr key={item.id}>
                   <td>{new Date(item.timestamp).toLocaleString()}</td>
                   <td>{item.source}</td>
