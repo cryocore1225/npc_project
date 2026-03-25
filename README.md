@@ -59,6 +59,51 @@ npm run start
 
 如果训练导出顺序不一致，映射结果会错位。
 
+## 5.1 Teachable Machine 导出前检查清单（必做）
+
+为保证“8类识别 -> 5类映射”正确，导出前请逐项确认：
+
+1. 类别数量  
+必须是 8 类，且包含：  
+`can, bottle, food, battery, paper, plastic, furniture, background`
+
+2. 类别顺序  
+顺序必须与上面完全一致。  
+本项目按“索引位置”读取模型输出，顺序错了会导致映射错位。
+
+3. 每类样本数量  
+每类建议至少 80~150 张，尽量均衡。  
+`background` 也要有足够样本（空桌面、地面、墙面等）。
+
+4. 数据多样性  
+每类都要覆盖：
+- 不同角度
+- 不同光线
+- 不同背景
+- 不同距离  
+避免只在单一背景下拍摄。
+
+5. 训练后快速验证  
+在 Teachable Machine 预览里测试：
+- `battery` 应明显高于其他类
+- `food` 与 `background` 不应频繁互相混淆
+- `furniture` 不应被大量判成 `general/background`
+
+6. 导出格式  
+导出 TensorFlow.js 后，确认至少包含：
+- `model.json`
+- `weights.bin`
+
+7. 文件部署路径  
+将导出文件放到：
+- `public/model/model.json`
+- `public/model/weights.bin`
+
+8. 前端验证  
+启动项目后，至少测试 8 张图（每类 1 张）：
+- 看 Top1 是否符合预期
+- 看映射后的 5 类是否正确
+
 ## 6. 映射规则（8类 -> 5类垃圾）
 
 - `can / bottle / paper / plastic` -> `Recyclables`（可回收）
