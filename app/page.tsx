@@ -834,22 +834,24 @@ export default function Page() {
             )}
           </div>
 
-          {imageUrl ? (
-            <NextImage
-              className="preview-image"
-              src={imageUrl}
-              alt="Selected waste item preview"
-              width={previewMeta?.width ?? 1280}
-              height={previewMeta?.height ?? 960}
-              unoptimized
-            />
-          ) : (
-            <div className="preview-placeholder">
-              <span />
-              <span />
-              <span />
-            </div>
-          )}
+          <div className="preview-frame">
+            {imageUrl ? (
+              <NextImage
+                className="preview-image"
+                src={imageUrl}
+                alt="Selected waste item preview"
+                width={previewMeta?.width ?? 1280}
+                height={previewMeta?.height ?? 960}
+                unoptimized
+              />
+            ) : (
+              <div className="preview-placeholder">
+                <span />
+                <span />
+                <span />
+              </div>
+            )}
+          </div>
         </section>
 
         <section className="card result-card">

@@ -406,21 +406,28 @@ button:disabled {
 }
 
 .preview-image {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  margin-top: 22px;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(42vh, 360px);
   border-radius: 24px;
   border: 1px solid var(--line);
   object-fit: contain;
   background: rgba(255, 255, 255, 0.7);
 }
 
+.preview-frame {
+  margin-top: 16px;
+  display: grid;
+  place-items: center;
+}
+
 .preview-placeholder {
   display: grid;
   place-items: center;
   gap: 14px;
-  min-height: 290px;
-  margin-top: 22px;
+  min-height: 150px;
+  width: 100%;
   border: 1px dashed var(--line-strong);
   border-radius: 24px;
   background:
@@ -696,6 +703,11 @@ button:disabled {
 
   .result-card {
     grid-column: auto;
+    order: 2;
+  }
+
+  .preview-card {
+    order: 3;
   }
 }
 
@@ -721,9 +733,12 @@ button:disabled {
     padding: 20px;
   }
 
-  .preview-image,
+  .preview-image {
+    max-height: min(34vh, 260px);
+  }
+
   .preview-placeholder {
-    min-height: 240px;
+    min-height: 120px;
   }
 
   .action-buttons {
