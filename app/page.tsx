@@ -728,11 +728,24 @@ export default function Page() {
         <div className="camera-overlay" role="dialog" aria-modal>
           <div className="camera-box">
             <div className="camera-head">
-              <button className="camera-ghost-btn" onClick={stopCamera} type="button">
-                {t.closeButton}
+              <button
+                className="camera-icon-btn"
+                onClick={stopCamera}
+                type="button"
+                aria-label={t.closeButton}
+                title={t.closeButton}
+              >
+                ×
               </button>
-              <button className="camera-ghost-btn" onClick={switchCamera} type="button" disabled={isOpeningCamera}>
-                {t.switchCameraButton}
+              <button
+                className="camera-icon-btn"
+                onClick={switchCamera}
+                type="button"
+                disabled={isOpeningCamera}
+                aria-label={t.switchCameraButton}
+                title={t.switchCameraButton}
+              >
+                ↻
               </button>
             </div>
             <video
@@ -746,9 +759,6 @@ export default function Page() {
             {cameraFacingMode === 'user' ? <p className="camera-hint camera-mirror-hint">{t.mirrorHint}</p> : null}
             {cameraError ? <p className="error-text">{cameraError}</p> : null}
             <div className="camera-controls">
-              <button className="camera-side-btn" onClick={stopCamera} type="button">
-                {t.closeButton}
-              </button>
               <button
                 className="camera-shutter-btn"
                 onClick={captureFromCamera}
@@ -757,9 +767,6 @@ export default function Page() {
                 aria-label={t.takePhotoButton}
               >
                 <span />
-              </button>
-              <button className="camera-side-btn" onClick={switchCamera} type="button" disabled={isOpeningCamera}>
-                {t.switchCameraButton}
               </button>
             </div>
           </div>
