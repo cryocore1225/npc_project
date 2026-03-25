@@ -1,65 +1,86 @@
-# NPC Trash Classifier
+# NPC 垃圾分类器
 
-Browser-based trash classification demo built with Next.js and TensorFlow.js.
+基于 Next.js + TensorFlow.js 的浏览器端垃圾分类演示项目。
 
-## Overview
+## 项目概览
 
-This project classifies waste in two stages:
+本项目支持“拍照/上传 -> 模型推理 -> 垃圾类别建议”的完整流程，提供中韩双语界面与本地统计看板。
 
-1. The model predicts 8 object classes.
-2. The app maps those classes into 5 trash categories.
+核心流程：
 
-It also includes:
+1. 接收图片输入（相机、本地文件、URL、剪贴板）。
+2. 模型推理并输出分类分数。
+3. 生成 Top3 结果与投放建议。
+4. 当置信度过低时标记 `undetermined`（不可判定），避免误导。
 
-- camera capture with retake/confirm flow
-- upload by file, URL, or clipboard
-- low-confidence fallback (`undetermined`)
-- bilingual UI (Chinese/Korean)
-- local analytics logs with `/admin` dashboard
+## 功能清单
 
-## Tech Stack
+- 相机拍照识别（拍后确认：`retake` / `use photo`）
+- 相机前后摄切换（移动端）
+- 上传识别（本地文件 / 图片 URL / 剪贴板）
+- 低置信度兜底（阈值 45%）
+- 结果展示：映射 Top3、原始物体 Top3、判定依据
+- 模型按需加载 + 首次加载进度条
+- 中韩双语切换（`npc_lang`）
+- `/admin` 推理日志统计、筛选、CSV 导出
 
-- Next.js 15 (App Router)
+## 技术栈
+
+- Next.js 15（App Router）
 - React 19
 - TypeScript
-- TensorFlow.js (`@tensorflow/tfjs`)
+- TensorFlow.js（`@tensorflow/tfjs`）
 
-## Routes
+## 页面路由
 
-- `/` main classifier page
-- `/admin` local analytics dashboard
+- `/` 主分类页面
+- `/admin` 本地统计看板
 
-## Setup
+## 运行方式
 
 ```bash
 npm install
 npm run dev
 ```
 
-Production:
+生产环境：
 
 ```bash
 npm run build
 npm run start
 ```
 
-## Model Files
+## 模型文件与版本
 
-Put model files in:
+将模型文件放置到：
 
 - `public/model/model.json`
 - `public/model/weights.bin`
 
-The app loads with version query for cache busting:
+当前通过版本参数加载模型（防缓存）：
 
-- `MODEL_VERSION = "model-v2"` in `app/page.tsx`
-- actual URL: `/model/model.json?v=model-v2`
+- `MODEL_VERSION = "model-v2"`（`app/page.tsx`）
+- 实际地址：`/model/model.json?v=model-v2`
 
-When you deploy a new model, update `MODEL_VERSION`.
+发布新模型时，请同步更新 `MODEL_VERSION`。
 
-## Required Output Order (8 classes)
+## 模型输出格式（重要）
 
-Model output order must match exactly:
+项目当前同时兼容两种输出格式：
+
+### A. 5 类直出模型
+
+若模型输出长度为 5，按以下顺序直接解释为垃圾类别：
+
+1. `General waste`
+2. `Food waste`
+3. `Recyclables`
+4. `Hazardous waste`
+5. `Bulk waste`
+
+### B. 8 类物体模型（再映射到 5 类）
+
+若模型输出长度为 8，顺序必须严格为：
 
 1. `can`
 2. `bottle`
@@ -70,101 +91,90 @@ Model output order must match exactly:
 7. `furniture`
 8. `background`
 
-## Mapping Rules (8 -> 5)
+映射规则：
 
 - `can / bottle / paper / plastic` -> `Recyclables`
 - `food` -> `Food waste`
 - `battery` -> `Hazardous waste`
 - `furniture` -> `Bulk waste`
-- everything else (including `background`) -> `General waste`
+- 其他（含 `background`）-> `General waste`
 
-## Confidence Strategy
+## 置信度策略
 
-- Threshold: `LOW_CONFIDENCE_THRESHOLD = 0.45`
-- If mapped Top1 confidence is below 45%:
-  - show `undetermined`
-  - ask user to retake or change angle
-  - avoid forcing a wrong category
+- 阈值：`LOW_CONFIDENCE_THRESHOLD = 0.45`
+- 映射后 Top1 < 45% 时：
+  - 标记为 `undetermined`
+  - 引导用户重拍/调整角度
+  - 不强行给出高风险分类建议
 
-## Main UX Features
+## 上传与相机说明
 
-### Upload Modal
+### 上传方式
 
-- centered modal (not bottom sheet)
-- source tabs:
-  - local file
-  - image URL
-  - clipboard image
+- 本地图片：文件选择器
+- 图片 URL：支持 `http/https` 且扩展名匹配常见图片后缀（如 `jpg/png/webp/gif/bmp/svg`）
+- 剪贴板：支持粘贴截图（`Ctrl/Cmd + V`）和主动读取剪贴板
 
-### Camera Flow
+### 相机能力
 
-- open camera
-- take shot
-- preview captured frame
-- actions: `retake` or `use photo`
+- 支持浏览器相机调用（需 HTTPS 或 localhost）
+- 常见错误（权限拒绝、设备不存在、设备占用）会弹窗提示
+- 前置摄像头画面会做非镜像校正提示
 
-### Camera Error Modal
+## 管理看板（`/admin`）
 
-- if camera fails (permission, busy device, missing device), a centered modal is shown
-- this is clearer on desktop than inline text
+日志存储：`localStorage` -> `npc_inference_logs_v1`
 
-### Preview Quality
+每条日志字段：
 
-- uses `next/image`
-- preview style uses `object-fit: contain`
-- shows original resolution (`width x height`)
+- `id`
+- `timestamp`
+- `source`（`camera/local/url/clipboard`）
+- `latencyMs`
+- `topLabel`
+- `topConfidence`
+- `undetermined`
+- `rawTopClass`
 
-## Admin Dashboard (`/admin`)
+看板功能：
 
-Data source: browser `localStorage` key `npc_inference_logs_v1`.
+- 总请求数
+- 低置信度占比
+- 平均耗时
+- 按来源筛选
+- 仅看 `undetermined`
+- 导出当前筛选结果为 CSV
 
-Each inference log stores:
+日志上限：`LOG_LIMIT = 200`（超过后按最新优先保留）。
 
-- timestamp
-- input source (`camera/local/url/clipboard`)
-- latency (ms)
-- mapped Top1 label + confidence
-- `undetermined` flag
-- raw Top1 class
+## 语言设置
 
-Dashboard features:
+- 首页将语言保存到 `localStorage` 的 `npc_lang`
+- `/admin` 自动沿用同一语言
 
-- total requests
-- low-confidence rate
-- average latency
-- detailed table
-- filter by source
-- filter only `undetermined`
-- CSV export for current filtered result
+## 常见问题
 
-Language behavior:
+### 1) 运行时报错 `Cannot find module './xxx.js'`
 
-- home page stores language in `localStorage` key `npc_lang`
-- `/admin` follows the same language key automatically
-
-## Troubleshooting
-
-### Runtime error: `Cannot find module './xxx.js'`
-
-Usually caused by stale `.next` cache in dev mode.
+通常是开发缓存导致：
 
 ```bash
 cmd /c "rmdir /s /q .next"
 npm run dev
 ```
 
-### Camera cannot open
+### 2) 相机无法打开
 
-- ensure camera permission is granted
-- ensure HTTPS or localhost
-- close other apps that may occupy the camera
+- 检查浏览器权限
+- 确认运行环境为 HTTPS 或 localhost
+- 关闭占用相机的其他应用
 
-### Model load failed
+### 3) 模型加载失败
 
-- verify both `model.json` and `weights.bin` exist
-- verify output class order matches the required 8-class order
+- 检查 `model.json` 与 `weights.bin` 是否存在
+- 检查输出格式是否符合“5 类直出”或“8 类映射”要求
 
-## Notes
+## 备注
 
-- The project currently keeps `src/App.tsx` for template compatibility.
-- Main product page is `app/page.tsx`.
+- `src/App.tsx` 为模板兼容保留文件。
+- 主页面实现位于 `app/page.tsx`。
