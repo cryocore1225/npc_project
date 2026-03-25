@@ -90,6 +90,7 @@ type Localized = {
   resolutionLabel: string
   analyzing: string
   resultTitle: string
+  resultReadyHint: string
   confidence: string
   top3Title: string
   rawTop3Title: string
@@ -189,6 +190,7 @@ const textMap: Record<Lang, Localized> = {
     resolutionLabel: '分辨率',
     analyzing: '正在分析图片...',
     resultTitle: '识别结果',
+    resultReadyHint: '识别完成，请查看 Top 3 与投放指南。',
     confidence: '置信度',
     top3Title: 'Top 3 候选',
     rawTop3Title: '原始物体识别 Top 3',
@@ -294,6 +296,7 @@ const textMap: Record<Lang, Localized> = {
     resolutionLabel: '해상도',
     analyzing: '이미지 분석 중...',
     resultTitle: '분류 결과',
+    resultReadyHint: '분석이 완료되었습니다. Top 3와 배출 가이드를 확인하세요.',
     confidence: '신뢰도',
     top3Title: 'Top 3 후보',
     rawTop3Title: '원본 객체 인식 Top 3',
@@ -848,8 +851,8 @@ export default function Page() {
                 ? t.analyzing
                 : isUndetermined
                 ? t.undeterminedHint
-                : mainResult
-                ? t.descriptions[mainResult.label]
+                : mainResult || topPredictions.length
+                ? t.resultReadyHint
                 : t.previewEmpty}
             </p>
           </div>

@@ -58,41 +58,39 @@ export default function AdminPage() {
 
   return (
     <main className="page-shell">
-      <section className="card" style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+      <section className="card admin-card">
+        <div className="admin-head">
           <div>
-            <h1 style={{ margin: 0 }}>Admin Logs</h1>
-            <p style={{ margin: '8px 0 0', color: 'var(--muted)' }}>
-              推理埋点统计（保存在浏览器 localStorage）。
-            </p>
+            <h1>Admin Logs</h1>
+            <p>推理埋点统计（浏览器本地 localStorage）。</p>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div className="admin-actions">
             <button className="secondary-button" onClick={loadLogs} type="button">
               刷新
             </button>
-            <Link className="secondary-button" href="/">
+            <Link className="secondary-button admin-home-link" href="/">
               返回首页
             </Link>
           </div>
         </div>
 
-        <div style={{ marginTop: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <div className="tip-list" style={{ marginTop: 0 }}>
+        <div className="admin-summary">
+          <div className="tip-list">
             <strong>总请求</strong>
-            <p style={{ margin: '6px 0 0' }}>{summary.total}</p>
+            <p>{summary.total}</p>
           </div>
-          <div className="tip-list" style={{ marginTop: 0 }}>
+          <div className="tip-list">
             <strong>低置信度占比</strong>
-            <p style={{ margin: '6px 0 0' }}>{summary.lowConfidenceRate}%</p>
+            <p>{summary.lowConfidenceRate}%</p>
           </div>
-          <div className="tip-list" style={{ marginTop: 0 }}>
+          <div className="tip-list">
             <strong>平均耗时</strong>
-            <p style={{ margin: '6px 0 0' }}>{summary.avgLatency}ms</p>
+            <p>{summary.avgLatency}ms</p>
           </div>
         </div>
 
-        <div style={{ marginTop: '18px', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div className="admin-table-wrap">
+          <table className="admin-table">
             <thead>
               <tr>
                 <th align="left">时间</th>
