@@ -229,6 +229,74 @@ button:disabled {
   margin-top: 24px;
 }
 
+.helper-line {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.93rem;
+}
+
+.upload-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.upload-panel-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.upload-source-tabs {
+  margin: 10px 0 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.upload-source-tab {
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-weight: 600;
+}
+
+.upload-source-tab.active {
+  color: #fff;
+  border-color: var(--text);
+  background: var(--text);
+}
+
+.url-import-row {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.url-input {
+  min-height: 48px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  padding: 0 14px;
+}
+
+.url-input:focus {
+  outline: 2px solid rgba(13, 138, 106, 0.24);
+  outline-offset: 1px;
+}
+
+.paste-zone {
+  margin-top: 2px;
+}
+
 .primary-button,
 .secondary-button {
   min-height: 48px;
@@ -479,6 +547,10 @@ button:disabled {
   .primary-button,
   .secondary-button {
     width: 100%;
+  }
+
+  .url-import-row {
+    grid-template-columns: 1fr;
   }
 }
 /* --- Camera overlay (WeChat-like) --- */

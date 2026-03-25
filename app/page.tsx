@@ -1,11 +1,12 @@
 ﻿'use client'
 
-import { ChangeEvent, useEffect, useRef, useState } from 'react'
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
 import * as tf from '@tensorflow/tfjs'
 
 type Lang = 'zh' | 'ko'
 type LabelKey = 'General waste' | 'Food waste' | 'Recyclables' | 'Hazardous waste' | 'Bulk waste'
 type ModelStatus = 'loading' | 'ready' | 'missing' | 'error'
+type UploadSource = 'local' | 'url' | 'clipboard'
 
 type PredictionItem = {
   label: LabelKey
@@ -31,6 +32,13 @@ type Localized = {
   actionHint: string
   takePhotoButton: string
   uploadButton: string
+  uploadPickerTitle: string
+  uploadFromLocal: string
+  uploadFromUrl: string
+  uploadFromClipboard: string
+  pasteZoneHint: string
+  pasteButton: string
+  clipboardUnsupported: string
   pasteHint: string
   urlPlaceholder: string
   loadUrlButton: string
@@ -94,6 +102,13 @@ const textMap: Record<Lang, Localized> = {
     actionHint: '可以直接拍照（电脑/手机摄像头）或从本地上传。',
     takePhotoButton: '拍照识别',
     uploadButton: '上传图片',
+    uploadPickerTitle: '选择上传方式',
+    uploadFromLocal: '本地图片',
+    uploadFromUrl: '图片 URL',
+    uploadFromClipboard: '截图粘贴',
+    pasteZoneHint: '先截图并复制，然后在此模式按 Ctrl/Cmd + V。',
+    pasteButton: '读取剪贴板图片',
+    clipboardUnsupported: '当前浏览器不支持主动读取剪贴板，请使用 Ctrl/Cmd + V 粘贴。',
     pasteHint: '支持直接粘贴截图（Ctrl/Cmd + V）或输入图片 URL。',
     urlPlaceholder: '粘贴图片 URL（https://...）',
     loadUrlButton: '导入 URL 图片',
@@ -160,6 +175,13 @@ const textMap: Record<Lang, Localized> = {
     actionHint: '카메라 촬영(PC/모바일) 또는 파일 업로드가 가능합니다.',
     takePhotoButton: '사진 촬영',
     uploadButton: '이미지 업로드',
+    uploadPickerTitle: '업로드 방식 선택',
+    uploadFromLocal: '로컬 이미지',
+    uploadFromUrl: '이미지 URL',
+    uploadFromClipboard: '스크린샷 붙여넣기',
+    pasteZoneHint: '스크린샷을 복사한 뒤 이 모드에서 Ctrl/Cmd + V를 누르세요.',
+    pasteButton: '클립보드 이미지 읽기',
+    clipboardUnsupported: '브라우저에서 클립보드 읽기를 지원하지 않습니다. Ctrl/Cmd + V를 사용하세요.',
     pasteHint: '스크린샷 붙여넣기(Ctrl/Cmd + V) 또는 이미지 URL 입력을 지원합니다.',
     urlPlaceholder: '이미지 URL 붙여넣기 (https://...)',
     loadUrlButton: 'URL 이미지 불러오기',
@@ -217,6 +239,8 @@ export default function Page() {
 
   const [imageUrl, setImageUrl] = useState('')
   const [remoteImageUrl, setRemoteImageUrl] = useState('')
+  const [isUploadPanelOpen, setIsUploadPanelOpen] = useState(false)
+  const [uploadSource, setUploadSource] = useState<UploadSource>('local')
   const [fileName, setFileName] = useState('')
   const [mainResult, setMainResult] = useState<PredictionItem | null>(null)
   const [topPredictions, setTopPredictions] = useState<PredictionItem[]>([])
@@ -235,6 +259,24 @@ export default function Page() {
 
   const supportsCamera =
     typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+
+  const runPredictFromUrl = useCallback(
+    async (url: string, defaultErrorMessage = t.predictionError) => {
+      if (!modelRef.current) return
+      setIsPredicting(true)
+      try {
+        const img = await readImage(url)
+        const results = await predictTop3(modelRef.current, img)
+        setTopPredictions(results)
+        setMainResult(results[0] ?? null)
+      } catch (err) {
+        setPredictionError((err as Error)?.message || defaultErrorMessage)
+      } finally {
+        setIsPredicting(false)
+      }
+    },
+    [t.predictionError],
+  )
 
   useEffect(() => {
     let mounted = true
@@ -259,6 +301,8 @@ export default function Page() {
   }, [])
 
   useEffect(() => {
+    if (!isUploadPanelOpen || uploadSource !== 'clipboard') return
+
     function onPaste(e: ClipboardEvent) {
       const items = e.clipboardData?.items
       if (!items?.length) return
@@ -283,7 +327,7 @@ export default function Page() {
 
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [t.pasteNoImage])
+  }, [isUploadPanelOpen, runPredictFromUrl, t.pasteNoImage, uploadSource])
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -370,23 +414,9 @@ export default function Page() {
     const url = URL.createObjectURL(file)
     setImageUrl(url)
     setFileName(file.name)
+    setIsUploadPanelOpen(false)
 
     await runPredictFromUrl(url)
-  }
-
-  async function runPredictFromUrl(url: string) {
-    if (!modelRef.current) return
-    setIsPredicting(true)
-    try {
-      const img = await readImage(url)
-      const results = await predictTop3(modelRef.current, img)
-      setTopPredictions(results)
-      setMainResult(results[0] ?? null)
-    } catch (err) {
-      setPredictionError((err as Error)?.message || t.predictionError)
-    } finally {
-      setIsPredicting(false)
-    }
   }
 
   async function loadFromImageUrl() {
@@ -400,12 +430,45 @@ export default function Page() {
     setMainResult(null)
     setImageUrl(target)
     setFileName('remote-image')
+    setIsUploadPanelOpen(false)
+
+    await runPredictFromUrl(target, t.urlLoadFailed)
+  }
+
+  async function loadFromClipboard() {
+    if (!window.isSecureContext || !navigator.clipboard?.read) {
+      setPredictionError(t.clipboardUnsupported)
+      return
+    }
 
     try {
-      await runPredictFromUrl(target)
+      const clipboardItems = await navigator.clipboard.read()
+      const imageItem = clipboardItems.find((item) =>
+        item.types.some((type) => type.startsWith('image/')),
+      )
+      if (!imageItem) {
+        setPredictionError(t.pasteNoImage)
+        return
+      }
+
+      const imageType = imageItem.types.find((type) => type.startsWith('image/')) ?? 'image/png'
+      const blob = await imageItem.getType(imageType)
+      const url = URL.createObjectURL(blob)
+
+      setPredictionError('')
+      setMainResult(null)
+      setImageUrl(url)
+      setFileName('clipboard-image.png')
+      setIsUploadPanelOpen(false)
+      await runPredictFromUrl(url)
     } catch {
-      setPredictionError(t.urlLoadFailed)
+      setPredictionError(t.clipboardUnsupported)
     }
+  }
+
+  function openUploadPanel() {
+    setPredictionError('')
+    setIsUploadPanelOpen((prev) => !prev)
   }
 
   return (
@@ -471,13 +534,78 @@ export default function Page() {
 
             <button
               className="secondary-button"
-              onClick={() => uploadInputRef.current?.click()}
+              onClick={openUploadPanel}
               disabled={modelStatus !== 'ready'}
               type="button"
             >
               {t.uploadButton}
             </button>
           </div>
+
+          {isUploadPanelOpen ? (
+            <div className="upload-panel">
+              <p className="upload-panel-title">{t.uploadPickerTitle}</p>
+              <div className="upload-source-tabs">
+                <button
+                  className={`upload-source-tab ${uploadSource === 'local' ? 'active' : ''}`}
+                  onClick={() => setUploadSource('local')}
+                  type="button"
+                >
+                  {t.uploadFromLocal}
+                </button>
+                <button
+                  className={`upload-source-tab ${uploadSource === 'url' ? 'active' : ''}`}
+                  onClick={() => setUploadSource('url')}
+                  type="button"
+                >
+                  {t.uploadFromUrl}
+                </button>
+                <button
+                  className={`upload-source-tab ${uploadSource === 'clipboard' ? 'active' : ''}`}
+                  onClick={() => setUploadSource('clipboard')}
+                  type="button"
+                >
+                  {t.uploadFromClipboard}
+                </button>
+              </div>
+
+              {uploadSource === 'local' ? (
+                <button className="secondary-button" onClick={() => uploadInputRef.current?.click()} type="button">
+                  {t.uploadFromLocal}
+                </button>
+              ) : null}
+
+              {uploadSource === 'url' ? (
+                <div className="url-import-row">
+                  <input
+                    className="url-input"
+                    type="url"
+                    value={remoteImageUrl}
+                    onChange={(e) => setRemoteImageUrl(e.target.value)}
+                    placeholder={t.urlPlaceholder}
+                    disabled={modelStatus !== 'ready'}
+                  />
+                  <button
+                    className="secondary-button"
+                    onClick={loadFromImageUrl}
+                    disabled={modelStatus !== 'ready'}
+                    type="button"
+                  >
+                    {t.loadUrlButton}
+                  </button>
+                </div>
+              ) : null}
+
+              {uploadSource === 'clipboard' ? (
+                <div className="paste-zone">
+                  <p className="helper-line">{t.pasteZoneHint}</p>
+                  <button className="secondary-button" onClick={loadFromClipboard} type="button">
+                    {t.pasteButton}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <input
             ref={takePhotoInputRef}
