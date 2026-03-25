@@ -1,4 +1,5 @@
 import js from '@eslint/js'
+import nextPlugin from '@next/eslint-plugin-next'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
@@ -10,6 +11,7 @@ export default defineConfig([
     files: ['**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
+      nextPlugin.configs['core-web-vitals'],
       ...tseslint.configs.recommended,
       reactHooks.configs.flat.recommended,
     ],
