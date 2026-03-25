@@ -1,12 +1,13 @@
 ﻿'use client'
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
-import * as tf from '@tensorflow/tfjs'
 
 type Lang = 'zh' | 'ko'
 type LabelKey = 'General waste' | 'Food waste' | 'Recyclables' | 'Hazardous waste' | 'Bulk waste'
-type ModelStatus = 'loading' | 'ready' | 'missing' | 'error'
+type ModelStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'error'
 type UploadSource = 'local' | 'url' | 'clipboard'
+type TfModule = typeof import('@tensorflow/tfjs')
+type TfLayersModel = import('@tensorflow/tfjs').LayersModel
 
 type PredictionItem = {
   label: LabelKey
@@ -22,6 +23,8 @@ type Localized = {
   langKo: string
   statusLoading: string
   statusLoadingHint: string
+  statusIdle: string
+  statusIdleHint: string
   statusReady: string
   statusReadyHint: string
   statusMissing: string
@@ -91,6 +94,8 @@ const textMap: Record<Lang, Localized> = {
     statusLoading: '正在加载模型...',
     statusLoadingHint:
       '首次打开页面时会从浏览器下载 TensorFlow 和模型文件，请耐心等待。',
+    statusIdle: '模型将按需加载。',
+    statusIdleHint: '首次识别时才加载模型，可加快页面打开速度。',
     statusReady: '模型已就绪，可以开始识别。',
     statusReadyHint: '选择或拍摄一张图片，系统会给出 Top 3 结果。',
     statusMissing: '未找到模型文件。',
@@ -164,6 +169,8 @@ const textMap: Record<Lang, Localized> = {
     langKo: '한국어',
     statusLoading: '모델을 불러오는 중...',
     statusLoadingHint: '첫 실행 시 TensorFlow와 모델 파일을 다운로드합니다.',
+    statusIdle: '모델은 필요할 때 로드됩니다.',
+    statusIdleHint: '첫 분석 시 로드되어 초기 페이지 속도를 높입니다.',
     statusReady: '모델 준비 완료. 분석을 시작할 수 있어요.',
     statusReadyHint: '사진을 선택하거나 촬영하면 Top 3 결과를 보여드립니다.',
     statusMissing: '모델 파일을 찾을 수 없습니다.',
@@ -233,7 +240,7 @@ export default function Page() {
   const [lang, setLang] = useState<Lang>('zh')
   const t = textMap[lang]
 
-  const [modelStatus, setModelStatus] = useState<ModelStatus>('loading')
+  const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
   const [predictionError, setPredictionError] = useState('')
   const [isPredicting, setIsPredicting] = useState(false)
 
@@ -245,7 +252,8 @@ export default function Page() {
   const [mainResult, setMainResult] = useState<PredictionItem | null>(null)
   const [topPredictions, setTopPredictions] = useState<PredictionItem[]>([])
 
-  const modelRef = useRef<tf.LayersModel | null>(null)
+  const tfRef = useRef<TfModule | null>(null)
+  const modelRef = useRef<TfLayersModel | null>(null)
   const takePhotoInputRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
@@ -260,13 +268,38 @@ export default function Page() {
   const supportsCamera =
     typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 
+  const ensureModelReady = useCallback(async () => {
+    if (modelRef.current && tfRef.current) {
+      setModelStatus((prev) => (prev === 'ready' ? prev : 'ready'))
+      return true
+    }
+
+    setModelStatus('loading')
+    try {
+      const tf = tfRef.current ?? (await import('@tensorflow/tfjs'))
+      tfRef.current = tf
+      await tf.ready()
+
+      const model = await tf.loadLayersModel(MODEL_PATH)
+      modelRef.current = model
+      setModelStatus('ready')
+      return true
+    } catch (err) {
+      const msg = (err as Error)?.message ?? ''
+      if (isMissingModelError(msg)) setModelStatus('missing')
+      else setModelStatus('error')
+      return false
+    }
+  }, [])
+
   const runPredictFromUrl = useCallback(
     async (url: string, defaultErrorMessage = t.predictionError) => {
-      if (!modelRef.current) return
+      const modelReady = await ensureModelReady()
+      if (!modelReady || !modelRef.current || !tfRef.current) return
       setIsPredicting(true)
       try {
         const img = await readImage(url)
-        const results = await predictTop3(modelRef.current, img)
+        const results = await predictTop3(tfRef.current, modelRef.current, img)
         setTopPredictions(results)
         setMainResult(results[0] ?? null)
       } catch (err) {
@@ -275,29 +308,11 @@ export default function Page() {
         setIsPredicting(false)
       }
     },
-    [t.predictionError],
+    [ensureModelReady, t.predictionError],
   )
 
   useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      try {
-        await tf.ready()
-        const model = await tf.loadLayersModel(MODEL_PATH)
-        if (!mounted) return
-        modelRef.current = model
-        setModelStatus('ready')
-      } catch (err) {
-        if (!mounted) return
-        const msg = (err as Error)?.message ?? ''
-        if (isMissingModelError(msg)) setModelStatus('missing')
-        else setModelStatus('error')
-      }
-    })()
-    return () => {
-      mounted = false
-      stopCamera()
-    }
+    return () => stopCamera()
   }, [])
 
   useEffect(() => {
@@ -523,22 +538,24 @@ export default function Page() {
           </div>
 
           <div className="action-buttons">
-            <button
-              className="primary-button"
-              onClick={openCamera}
-              disabled={modelStatus !== 'ready'}
-              type="button"
-            >
-              {t.takePhotoButton}
+              <button
+                className="primary-button"
+                onClick={() => {
+                  void openCamera()
+                }}
+                disabled={modelStatus === 'loading'}
+                type="button"
+              >
+                {t.takePhotoButton}
             </button>
 
-            <button
-              className="secondary-button"
-              onClick={openUploadPanel}
-              disabled={modelStatus !== 'ready'}
-              type="button"
-            >
-              {t.uploadButton}
+              <button
+                className="secondary-button"
+                onClick={openUploadPanel}
+                disabled={modelStatus === 'loading'}
+                type="button"
+              >
+                {t.uploadButton}
             </button>
           </div>
 
@@ -583,12 +600,12 @@ export default function Page() {
                     value={remoteImageUrl}
                     onChange={(e) => setRemoteImageUrl(e.target.value)}
                     placeholder={t.urlPlaceholder}
-                    disabled={modelStatus !== 'ready'}
+                    disabled={modelStatus === 'loading'}
                   />
                   <button
                     className="secondary-button"
                     onClick={loadFromImageUrl}
-                    disabled={modelStatus !== 'ready'}
+                    disabled={modelStatus === 'loading'}
                     type="button"
                   >
                     {t.loadUrlButton}
@@ -613,7 +630,7 @@ export default function Page() {
             accept="image/*"
             capture="environment"
             onChange={handleFileChange}
-            disabled={modelStatus !== 'ready'}
+            disabled={modelStatus === 'loading'}
             hidden
           />
           <input
@@ -621,7 +638,7 @@ export default function Page() {
             type="file"
             accept="image/*"
             onChange={handleFileChange}
-            disabled={modelStatus !== 'ready'}
+            disabled={modelStatus === 'loading'}
             hidden
           />
 
@@ -730,25 +747,6 @@ export default function Page() {
             </div>
           </div>
 
-          <p className="helper-line">{t.pasteHint}</p>
-          <div className="url-import-row">
-            <input
-              className="url-input"
-              type="url"
-              value={remoteImageUrl}
-              onChange={(e) => setRemoteImageUrl(e.target.value)}
-              placeholder={t.urlPlaceholder}
-              disabled={modelStatus !== 'ready'}
-            />
-            <button
-              className="secondary-button"
-              onClick={loadFromImageUrl}
-              disabled={modelStatus !== 'ready'}
-              type="button"
-            >
-              {t.loadUrlButton}
-            </button>
-          </div>
         </div>
       ) : null}
     </main>
@@ -756,6 +754,7 @@ export default function Page() {
 }
 
 function getStatusText(modelStatus: ModelStatus, t: Localized) {
+  if (modelStatus === 'idle') return t.statusIdle
   if (modelStatus === 'loading') return t.statusLoading
   if (modelStatus === 'ready') return t.statusReady
   if (modelStatus === 'missing') return t.statusMissing
@@ -763,6 +762,7 @@ function getStatusText(modelStatus: ModelStatus, t: Localized) {
 }
 
 function getStatusHint(modelStatus: ModelStatus, t: Localized) {
+  if (modelStatus === 'idle') return t.statusIdleHint
   if (modelStatus === 'loading') return t.statusLoadingHint
   if (modelStatus === 'ready') return t.statusReadyHint
   if (modelStatus === 'missing') return t.statusMissingHint
@@ -790,7 +790,7 @@ async function readImage(src: string): Promise<HTMLImageElement> {
   return image
 }
 
-async function predictTop3(model: tf.LayersModel, source: HTMLImageElement): Promise<PredictionItem[]> {
+async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImageElement): Promise<PredictionItem[]> {
   const tensor = tf.tidy(() => {
     const pixels = tf.browser.fromPixels(source)
     const resized = tf.image.resizeBilinear(pixels, [IMAGE_SIZE, IMAGE_SIZE])
