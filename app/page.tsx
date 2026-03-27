@@ -883,7 +883,8 @@ function isMissingModelError(message: string) {
 }
 
 function formatConfidence(value: number) {
-  return `${(value * 100).toFixed(2)}%`
+  const safe = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+  return `${(safe * 100).toFixed(2)}%`
 }
 
 async function readImage(src: string): Promise<HTMLImageElement> {
@@ -906,7 +907,8 @@ async function predictTop3(ort: OrtModule, model: OrtSession, source: HTMLImageE
   if (!output || !('data' in output)) throw new Error('Unexpected model output.')
   const outputData = output.data as ArrayLike<number> | undefined
   if (!outputData) throw new Error('Unexpected model output.')
-  const scores = Array.from(outputData, (value) => Number(value))
+  const rawScores = Array.from(outputData, (value) => Number(value))
+  const scores = normalizeScores(rawScores)
 
   const mappedTop3 = mapScoresToTrashPredictions(scores)
   const rawTop3 = getRawObjectTop3(scores)
@@ -1005,6 +1007,32 @@ function getDimensionNumber(value: number | string | bigint | boolean | null | u
     if (Number.isFinite(parsed) && parsed > 0) return parsed
   }
   return fallback
+}
+
+function normalizeScores(scores: number[]) {
+  if (!scores.length) return scores
+
+  const finiteScores = scores.map((value) => (Number.isFinite(value) ? value : 0))
+  const min = Math.min(...finiteScores)
+  const max = Math.max(...finiteScores)
+  const sum = finiteScores.reduce((acc, value) => acc + value, 0)
+
+  if (min >= 0 && max <= 1 && sum > 0.98 && sum < 1.02) {
+    return finiteScores
+  }
+
+  if (min >= 0 && sum > 0) {
+    return finiteScores.map((value) => value / sum)
+  }
+
+  const maxLogit = Math.max(...finiteScores)
+  const expScores = finiteScores.map((value) => Math.exp(Math.max(value - maxLogit, -50)))
+  const expSum = expScores.reduce((acc, value) => acc + value, 0)
+  if (!Number.isFinite(expSum) || expSum <= 0) {
+    const uniform = 1 / finiteScores.length
+    return finiteScores.map(() => uniform)
+  }
+  return expScores.map((value) => value / expSum)
 }
 
 function mapToTrash(className: string): LabelKey {
