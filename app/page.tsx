@@ -13,8 +13,8 @@ import {
 
 type ModelStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'error'
 type UploadSource = 'local' | 'url' | 'clipboard'
-type TfModule = typeof import('@tensorflow/tfjs')
-type TfLayersModel = import('@tensorflow/tfjs').LayersModel
+type OrtModule = typeof import('onnxruntime-web')
+type OrtSession = import('onnxruntime-web').InferenceSession
 
 type PredictionItem = {
   label: LabelKey
@@ -45,8 +45,8 @@ type InferenceLog = {
   rawTopClass: ObjectClassKey | null
 }
 
-const MODEL_PATH = '/model/model.json'
-const MODEL_VERSION = 'model-v2'
+const MODEL_PATH = '/model/model.onnx'
+const MODEL_VERSION = 'model-v1'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
@@ -98,8 +98,8 @@ export default function Page() {
   const [isUndetermined, setIsUndetermined] = useState(false)
   const [modelLoadProgress, setModelLoadProgress] = useState(0)
 
-  const tfRef = useRef<TfModule | null>(null)
-  const modelRef = useRef<TfLayersModel | null>(null)
+  const ortRef = useRef<OrtModule | null>(null)
+  const modelRef = useRef<OrtSession | null>(null)
   const displayBlobUrlRef = useRef<string | null>(null)
   const capturedBlobUrlRef = useRef<string | null>(null)
   const takePhotoInputRef = useRef<HTMLInputElement>(null)
@@ -137,7 +137,7 @@ export default function Page() {
   }, [])
 
   const ensureModelReady = useCallback(async () => {
-    if (modelRef.current && tfRef.current) {
+    if (modelRef.current && ortRef.current) {
       setModelStatus((prev) => (prev === 'ready' ? prev : 'ready'))
       return true
     }
@@ -145,12 +145,14 @@ export default function Page() {
     setModelStatus('loading')
     setModelLoadProgress(0)
     try {
-      const tf = tfRef.current ?? (await import('@tensorflow/tfjs'))
-      tfRef.current = tf
-      await tf.ready()
+      setModelLoadProgress(15)
+      const ort = ortRef.current ?? (await import('onnxruntime-web'))
+      ortRef.current = ort
+      setModelLoadProgress(45)
 
-      const model = await tf.loadLayersModel(VERSIONED_MODEL_PATH, {
-        onProgress: (fraction) => setModelLoadProgress(Math.round(fraction * 100)),
+      const supportsWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
+      const model = await ort.InferenceSession.create(VERSIONED_MODEL_PATH, {
+        executionProviders: supportsWebGpu ? ['webgpu', 'wasm'] : ['wasm'],
       })
       modelRef.current = model
       setModelStatus('ready')
@@ -167,7 +169,7 @@ export default function Page() {
   const runPredictFromUrl = useCallback(
     async (url: string, source: InputSource, defaultErrorMessage = t.predictionError) => {
       const modelReady = await ensureModelReady()
-      if (!modelReady || !modelRef.current || !tfRef.current) return
+      if (!modelReady || !modelRef.current || !ortRef.current) return
       setIsPredicting(true)
       const startedAt = performance.now()
       try {
@@ -176,7 +178,7 @@ export default function Page() {
           width: img.naturalWidth || img.width,
           height: img.naturalHeight || img.height,
         })
-        const analysis = await predictTop3(tfRef.current, modelRef.current, img)
+        const analysis = await predictTop3(ortRef.current, modelRef.current, img)
         setTopPredictions(analysis.mappedTop3)
         setRawTopPredictions(analysis.rawTop3)
         setIsUndetermined(analysis.isUndetermined)
@@ -896,25 +898,15 @@ async function readImage(src: string): Promise<HTMLImageElement> {
   return image
 }
 
-async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImageElement): Promise<PredictionAnalysis> {
-  const tensor = tf.tidy(() => {
-    const pixels = tf.browser.fromPixels(source)
-    const resized = tf.image.resizeBilinear(pixels, [IMAGE_SIZE, IMAGE_SIZE])
-    const normalized = resized.toFloat().div(255)
-    return normalized.expandDims(0)
-  })
-
-  const output = model.predict(tensor)
-
-  if (!output || Array.isArray(output)) {
-    tensor.dispose()
-    throw new Error('Unexpected model output.')
-  }
-
-  const scores = Array.from(await output.data())
-
-  tensor.dispose()
-  output.dispose()
+async function predictTop3(ort: OrtModule, model: OrtSession, source: HTMLImageElement): Promise<PredictionAnalysis> {
+  const inputTensor = createInputTensor(ort, model, source)
+  const outputMap = await model.run({ [inputTensor.name]: inputTensor.tensor })
+  const primaryOutputName = model.outputNames[0]
+  const output = primaryOutputName ? outputMap[primaryOutputName] : undefined
+  if (!output || !('data' in output)) throw new Error('Unexpected model output.')
+  const outputData = output.data as ArrayLike<number> | undefined
+  if (!outputData) throw new Error('Unexpected model output.')
+  const scores = Array.from(outputData, (value) => Number(value))
 
   const mappedTop3 = mapScoresToTrashPredictions(scores)
   const rawTop3 = getRawObjectTop3(scores)
@@ -925,6 +917,94 @@ async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImage
     rawTop3,
     isUndetermined,
   }
+}
+
+function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageElement) {
+  const inputName = model.inputNames[0]
+  if (!inputName) {
+    throw new Error('Model input not found.')
+  }
+
+  const metadata = model.inputMetadata[0]
+  if (!metadata || !metadata.isTensor) {
+    throw new Error('Model input metadata is invalid.')
+  }
+
+  const dimensions = metadata.shape
+  const isNchw = Number(dimensions[1]) === 3
+  const isNhwc = Number(dimensions[3]) === 3
+  const layout: 'nchw' | 'nhwc' = isNhwc && !isNchw ? 'nhwc' : 'nchw'
+  const targetHeight = getDimensionNumber(layout === 'nchw' ? dimensions[2] : dimensions[1], IMAGE_SIZE)
+  const targetWidth = getDimensionNumber(layout === 'nchw' ? dimensions[3] : dimensions[2], IMAGE_SIZE)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Canvas context unavailable.')
+  }
+  ctx.drawImage(source, 0, 0, targetWidth, targetHeight)
+
+  const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight).data
+  const expectsUint8 = metadata.type === 'uint8'
+  const tensorType: 'float32' | 'uint8' = expectsUint8 ? 'uint8' : 'float32'
+  const channelCount = 3
+  const spatialSize = targetWidth * targetHeight
+  const data =
+    tensorType === 'uint8'
+      ? new Uint8Array(spatialSize * channelCount)
+      : new Float32Array(spatialSize * channelCount)
+
+  if (layout === 'nchw') {
+    for (let pixelIndex = 0; pixelIndex < spatialSize; pixelIndex += 1) {
+      const offset = pixelIndex * 4
+      const r = imageData[offset] ?? 0
+      const g = imageData[offset + 1] ?? 0
+      const b = imageData[offset + 2] ?? 0
+      if (tensorType === 'uint8') {
+        data[pixelIndex] = r
+        data[pixelIndex + spatialSize] = g
+        data[pixelIndex + spatialSize * 2] = b
+      } else {
+        data[pixelIndex] = r / 255
+        data[pixelIndex + spatialSize] = g / 255
+        data[pixelIndex + spatialSize * 2] = b / 255
+      }
+    }
+  } else {
+    for (let pixelIndex = 0; pixelIndex < spatialSize; pixelIndex += 1) {
+      const offset = pixelIndex * 4
+      const base = pixelIndex * channelCount
+      const r = imageData[offset] ?? 0
+      const g = imageData[offset + 1] ?? 0
+      const b = imageData[offset + 2] ?? 0
+      if (tensorType === 'uint8') {
+        data[base] = r
+        data[base + 1] = g
+        data[base + 2] = b
+      } else {
+        data[base] = r / 255
+        data[base + 1] = g / 255
+        data[base + 2] = b / 255
+      }
+    }
+  }
+
+  const shape = layout === 'nchw' ? [1, 3, targetHeight, targetWidth] : [1, targetHeight, targetWidth, 3]
+  return {
+    name: inputName,
+    tensor: new ort.Tensor(tensorType, data, shape),
+  }
+}
+
+function getDimensionNumber(value: number | string | bigint | boolean | null | undefined, fallback: number) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return fallback
 }
 
 function mapToTrash(className: string): LabelKey {

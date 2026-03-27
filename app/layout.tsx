@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'N.P.C 垃圾分类助手',
-  description: '使用 TensorFlow.js 在浏览器中分析图片并给出垃圾分类建议。',
+  description: '使用 ONNX Runtime Web 在浏览器中分析图片并给出垃圾分类建议。',
 }
 
 export default function RootLayout({
