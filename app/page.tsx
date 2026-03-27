@@ -465,6 +465,9 @@ export default function Page() {
     uploadInputRef.current?.click()
   }
 
+  const topRawClass = rawTopPredictions[0]?.className
+  const topRawMappedLabel = topRawClass ? mapToTrash(topRawClass) : null
+
   return (
     <main className="page-shell">
       <section className="hero card">
@@ -632,6 +635,13 @@ export default function Page() {
               <p className="confidence-line">
                 {t.confidence} <strong>{formatConfidence(mainResult.confidence)}</strong>
               </p>
+              {topRawClass && topRawMappedLabel ? (
+                <p className="confidence-line">
+                  <strong>{t.rawLabels[topRawClass]}</strong>
+                  {' -> '}
+                  <strong>{t.labels[topRawMappedLabel]}</strong>
+                </p>
+              ) : null}
 
               <div className="ranking-list">
                 <h3>{t.top3Title}</h3>
@@ -663,6 +673,13 @@ export default function Page() {
                 {t.lowConfidenceHint}
                 <strong>{formatConfidence(topPredictions[0]?.confidence ?? 0)}</strong>
               </p>
+              {topRawClass && topRawMappedLabel ? (
+                <p className="confidence-line">
+                  <strong>{t.rawLabels[topRawClass]}</strong>
+                  {' -> '}
+                  <strong>{t.labels[topRawMappedLabel]}</strong>
+                </p>
+              ) : null}
 
               <div className="ranking-list">
                 <h3>{t.top3Title}</h3>
