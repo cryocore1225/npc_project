@@ -1088,7 +1088,8 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
       .slice(0, 3)
   }
 
-  // Case B: model outputs object classes (12 classes), then map to trash buckets
+  // Case B: model outputs object classes (12 classes), then map to trash buckets.
+  // Use max per bucket (instead of sum) to avoid biasing buckets that own more source classes.
   const bucket: Record<LabelKey, number> = {
     'General waste': 0,
     'Food waste': 0,
@@ -1100,7 +1101,7 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
   scores.forEach((score, index) => {
     const className = supportedObjectClasses[index] ?? 'trash'
     const trashLabel = mapToTrash(className)
-    bucket[trashLabel] += score
+    bucket[trashLabel] = Math.max(bucket[trashLabel], score)
   })
 
   return supportedLabels

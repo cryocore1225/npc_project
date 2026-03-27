@@ -32,6 +32,28 @@ npm run start
 
 前端默认加载地址：`/model/model.onnx?v=model-v1`
 
+## 数据来源
+
+训练数据来源于 Kaggle：
+
+- https://www.kaggle.com/datasets/mostafaabla/garbage-classification
+
+## 数据增强（离线）
+
+训练前对原始图片做了离线增强，按类别目录遍历并生成以下变体：
+
+- 原图：`_orig`
+- 水平翻转：`_flip`
+- 旋转：`_rot15`、`_rot-15`
+- 亮度增强/减弱：`_bright`、`_dark`
+- 高斯模糊：`_blur`
+
+输出目录结构保持 `ImageFolder` 格式（`输出根目录/类别名/*.jpg`），文件名规则为：
+
+- `{class_name}_{count:04d}_{suffix}.jpg`
+
+可直接用于 PyTorch `datasets.ImageFolder` 训练。
+
 ## 分类体系（韩国 5 大类）
 
 页面最终输出为 5 类：
