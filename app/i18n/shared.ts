@@ -8,14 +8,18 @@ export type LabelKey =
   | 'Bulk waste'
 
 export type ObjectClassKey =
-  | 'can'
-  | 'bottle'
-  | 'food'
   | 'battery'
+  | 'biological'
+  | 'brown-glass'
+  | 'cardboard'
+  | 'clothes'
+  | 'green-glass'
+  | 'metal'
   | 'paper'
   | 'plastic'
-  | 'furniture'
-  | 'background'
+  | 'shoes'
+  | 'trash'
+  | 'white-glass'
 
 export const LANG_STORAGE_KEY = 'npc_lang'
 export const LOG_STORAGE_KEY = 'npc_inference_logs_v1'

@@ -59,14 +59,18 @@ const supportedLabels: LabelKey[] = [
   'Bulk waste',
 ]
 const supportedObjectClasses: ObjectClassKey[] = [
-  'can',
-  'bottle',
-  'food',
   'battery',
+  'biological',
+  'brown-glass',
+  'cardboard',
+  'clothes',
+  'green-glass',
+  'metal',
   'paper',
   'plastic',
-  'furniture',
-  'background',
+  'shoes',
+  'trash',
+  'white-glass',
 ]
 
 export default function Page() {
@@ -926,12 +930,21 @@ async function predictTop3(tf: TfModule, model: TfLayersModel, source: HTMLImage
 function mapToTrash(className: string): LabelKey {
   const normalized = className.trim().toLowerCase()
 
-  if (normalized === 'can' || normalized === 'bottle' || normalized === 'paper' || normalized === 'plastic') {
+  if (
+    normalized === 'brown-glass' ||
+    normalized === 'cardboard' ||
+    normalized === 'green-glass' ||
+    normalized === 'metal' ||
+    normalized === 'paper' ||
+    normalized === 'plastic' ||
+    normalized === 'white-glass'
+  ) {
     return 'Recyclables'
   }
-  if (normalized === 'food' || normalized === 'banana') return 'Food waste'
+  if (normalized === 'biological') return 'Food waste'
   if (normalized === 'battery') return 'Hazardous waste'
-  if (normalized === 'furniture' || normalized === 'chair') return 'Bulk waste'
+  if (normalized === 'clothes' || normalized === 'shoes') return 'Recyclables'
+  if (normalized === 'trash') return 'General waste'
   return 'General waste'
 }
 
@@ -947,7 +960,7 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
       .slice(0, 3)
   }
 
-  // Case B: model outputs object classes (8 classes), then map to trash buckets
+  // Case B: model outputs object classes (12 classes), then map to trash buckets
   const bucket: Record<LabelKey, number> = {
     'General waste': 0,
     'Food waste': 0,
@@ -957,7 +970,7 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
   }
 
   scores.forEach((score, index) => {
-    const className = supportedObjectClasses[index] ?? 'background'
+    const className = supportedObjectClasses[index] ?? 'trash'
     const trashLabel = mapToTrash(className)
     bucket[trashLabel] += score
   })
@@ -973,7 +986,7 @@ function getRawObjectTop3(scores: number[]): RawPredictionItem[] {
 
   return scores
     .map((confidence, index) => ({
-      className: supportedObjectClasses[index] ?? 'background',
+      className: supportedObjectClasses[index] ?? 'trash',
       confidence,
     }))
     .sort((a, b) => b.confidence - a.confidence)

@@ -1,40 +1,14 @@
-# NPC 垃圾分类器
+﻿# NPC 垃圾分类器
 
 基于 Next.js + TensorFlow.js 的浏览器端垃圾分类演示项目。
 
-## 项目概览
+## 项目能力
 
-本项目支持“拍照/上传 -> 模型推理 -> 垃圾分类建议”的完整流程，包含中韩双语、低置信度兜底与本地日志看板。
-
-核心流程：
-
-1. 接收图片输入（相机 / 本地文件 / URL / 剪贴板）。
-2. 模型推理输出分数。
-3. 展示 Top3 与投放建议。
-4. 当置信度低于阈值时标记为 `undetermined`，避免误导。
-
-## 功能清单
-
-- 相机拍照识别（拍后确认：`retake` / `use photo`）
-- 相机前后摄切换（移动端）
-- 上传识别（本地文件 / 图片 URL / 剪贴板）
-- 低置信度兜底（阈值 45%）
-- 结果展示：映射 Top3、原始物体 Top3、判定依据
-- 模型按需加载 + 首次加载进度条
-- 中韩双语切换（`npc_lang`）
-- `/admin` 日志统计、筛选、CSV 导出、清空日志
-
-## 技术栈
-
-- Next.js 15（App Router）
-- React 19
-- TypeScript
-- TensorFlow.js（`@tensorflow/tfjs`）
-
-## 页面路由
-
-- `/` 主分类页面
-- `/admin` 本地统计看板
+- 图片输入：拍照 / 本地上传 / URL / 剪贴板
+- 模型推理：浏览器端 TensorFlow.js
+- 结果展示：Top 3、低置信度兜底、投放建议
+- 管理面板：`/admin` 本地推理日志查看、筛选、CSV 导出
+- 中韩双语：中文 / 한국어
 
 ## 运行方式
 
@@ -43,34 +17,39 @@ npm install
 npm run dev
 ```
 
-生产环境：
+生产构建：
 
 ```bash
 npm run build
 npm run start
 ```
 
-## 模型文件与版本
+## 模型文件位置
 
-模型文件放置到：
+请将模型文件放到：
 
 - `public/model/model.json`
 - `public/model/weights.bin`
 
-当前通过版本参数防缓存加载：
+前端默认加载地址：`/model/model.json?v=model-v2`
 
-- `MODEL_VERSION = "model-v2"`（见 `app/page.tsx`）
-- 实际地址：`/model/model.json?v=model-v2`
+## 分类体系（韩国 5 大类）
 
-发布新模型时请同步更新 `MODEL_VERSION`。
+页面最终输出为 5 类：
 
-## 模型输出格式
+1. `General waste`（一般垃圾 / 종량제）
+2. `Food waste`（厨余垃圾 / 음식물）
+3. `Recyclables`（可回收物 / 재활용）
+4. `Hazardous waste`（有害/专项回收）
+5. `Bulk waste`（大件垃圾 / 申报）
 
-项目兼容两种输出：
+## 模型输出兼容
 
-### A. 5 类直出模型
+项目兼容两种模型输出格式：
 
-若输出长度为 5，按以下顺序解释：
+### A) 5 类直出模型
+
+输出长度为 5，顺序：
 
 1. `General waste`
 2. `Food waste`
@@ -78,115 +57,86 @@ npm run start
 4. `Hazardous waste`
 5. `Bulk waste`
 
-### B. 8 类物体模型（再映射到 5 类）
+### B) 12 类物体模型（映射到 5 类）
 
-若输出长度为 8，顺序必须为：
+输出长度为 12，顺序必须为：
 
-1. `can`
-2. `bottle`
-3. `food`
-4. `battery`
-5. `paper`
-6. `plastic`
-7. `furniture`
-8. `background`
+1. `battery`
+2. `biological`
+3. `brown-glass`
+4. `cardboard`
+5. `clothes`
+6. `green-glass`
+7. `metal`
+8. `paper`
+9. `plastic`
+10. `shoes`
+11. `trash`
+12. `white-glass`
 
 映射规则：
 
-- `can / bottle / paper / plastic` -> `Recyclables`
-- `food` -> `Food waste`
+- `brown-glass / cardboard / green-glass / metal / paper / plastic / white-glass` -> `Recyclables`
+- `biological` -> `Food waste`
 - `battery` -> `Hazardous waste`
-- `furniture` -> `Bulk waste`
-- 其他（含 `background`）-> `General waste`
+- `clothes / shoes` -> `Recyclables`
+- `trash`（及其他兜底）-> `General waste`
+
+## 韩国投放方法（页面文案对应）
+
+- `General waste`：使用 종량제 垃圾袋，避免混入可回收/厨余/有害物。
+- `Food waste`：先沥干水分并去包装，再投 음식물 专用桶/袋。
+- `Recyclables`：按材质分开（纸/塑料/金属/玻璃/衣物鞋类），尽量清洗并压缩体积。
+- `Hazardous waste`：废电池、废灯管等投放到专项回收箱。
+- `Bulk waste`：家具家电等需先申报缴费后按预约排出。
 
 ## 置信度策略
 
 - 阈值：`LOW_CONFIDENCE_THRESHOLD = 0.45`
-- 映射 Top1 < 45% 时：
-  - 标记 `undetermined`
-  - 引导用户重拍或调整角度
-  - 不强行给出高风险分类建议
+- 当 Top1 低于阈值时标记为 `undetermined`
 
-## 上传与相机说明
+## 日志面板（`/admin`）
 
-### 上传方式
+日志存储在 `localStorage`：`npc_inference_logs_v1`
 
-- 本地图片：文件选择器
-- 图片 URL：仅要求 `http/https`，实际是否可用以加载结果为准
-- 剪贴板：支持粘贴截图（`Ctrl/Cmd + V`）与主动读取剪贴板
+主要字段：
 
-### 相机能力
-
-- 支持浏览器相机调用（需 HTTPS 或 localhost）
-- 常见错误（权限拒绝、设备不存在、设备占用）会弹窗提示
-- 前置摄像头画面有非镜像校正提示
-
-## 日志与管理看板（`/admin`）
-
-日志存储：`localStorage` -> `npc_inference_logs_v1`
-
-每条日志字段：
-
-- `id`
 - `timestamp`
-- `source`（`camera/local/url/clipboard`）
-- `latencyMs`
+- `source`（camera/local/url/clipboard）
 - `topLabel`
 - `topConfidence`
 - `undetermined`
 - `rawTopClass`
+- `latencyMs`
 
-看板功能：
+支持功能：
 
-- 总请求数 / 低置信度占比 / 平均耗时
-- 按来源筛选
+- 汇总统计
+- 来源筛选
 - 仅看 `undetermined`
-- 导出当前筛选结果 CSV
-- 清空本地日志（带确认）
-
-日志上限：`LOG_LIMIT = 200`（最新优先保留）。
-
-## i18n 结构（已重构）
-
-- `app/i18n/shared.ts`：共享类型与存储 key
-- `app/i18n/homeText.ts`：首页中韩文案
-- `app/i18n/adminText.ts`：管理页中韩文案
-
-页面通过 `npc_lang` 读取语言：
-
-- 首页写入语言
-- `/admin` 自动沿用同一语言设置
-
-## 最近优化
-
-- URL 校验从“后缀匹配”改为“`http/https` 基础校验 + 实际加载判定”
-- 增加对象 URL 生命周期管理，避免频繁操作造成内存泄漏
-- 抽离 i18n 文案，降低 `app/page.tsx` 维护成本
-- `/admin` 增加“清空日志”按钮
+- CSV 导出
+- 一键清空
 
 ## 常见问题
 
-### 1) 运行时报错 `Cannot find module './xxx.js'`
+### 1) 模型加载失败
 
-通常是开发缓存导致：
+检查：
+
+- `public/model/model.json` 与 `weights.bin` 是否存在
+- 输出长度是否符合 5 类直出或 12 类映射
+
+### 2) 摄像头打不开
+
+检查：
+
+- 浏览器权限是否允许
+- 是否在 HTTPS 或 localhost 环境
+- 摄像头是否被其他应用占用
+
+### 3) 开发缓存导致异常
 
 ```bash
 cmd /c "rmdir /s /q .next"
 npm run dev
 ```
-
-### 2) 相机无法打开
-
-- 检查浏览器权限
-- 确认运行环境是 HTTPS 或 localhost
-- 关闭占用相机的其他应用
-
-### 3) 模型加载失败
-
-- 检查 `model.json` 与 `weights.bin` 是否存在
-- 检查输出是否符合“5 类直出”或“8 类映射”要求
-
-## 备注
-
-- `src/App.tsx` 为模板兼容保留文件。
-- 主页面实现位于 `app/page.tsx`。
