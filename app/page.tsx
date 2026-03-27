@@ -51,6 +51,8 @@ const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
 const LOG_LIMIT = 200
+const IMAGENET_MEAN = [0.485, 0.456, 0.406] as const
+const IMAGENET_STD = [0.229, 0.224, 0.225] as const
 const supportedLabels: LabelKey[] = [
   'General waste',
   'Food waste',
@@ -102,6 +104,7 @@ export default function Page() {
   const modelRef = useRef<OrtSession | null>(null)
   const displayBlobUrlRef = useRef<string | null>(null)
   const capturedBlobUrlRef = useRef<string | null>(null)
+  const inferenceRequestIdRef = useRef(0)
   const takePhotoInputRef = useRef<HTMLInputElement>(null)
   const uploadInputRef = useRef<HTMLInputElement>(null)
 
@@ -168,6 +171,12 @@ export default function Page() {
 
   const runPredictFromUrl = useCallback(
     async (url: string, source: InputSource, defaultErrorMessage = t.predictionError) => {
+      const requestId = ++inferenceRequestIdRef.current
+      setPredictionError('')
+      setMainResult(null)
+      setTopPredictions([])
+      setRawTopPredictions([])
+      setIsUndetermined(false)
       const modelReady = await ensureModelReady()
       if (!modelReady || !modelRef.current || !ortRef.current) return
       setIsPredicting(true)
@@ -179,6 +188,7 @@ export default function Page() {
           height: img.naturalHeight || img.height,
         })
         const analysis = await predictTop3(ortRef.current, modelRef.current, img)
+        if (requestId !== inferenceRequestIdRef.current) return
         setTopPredictions(analysis.mappedTop3)
         setRawTopPredictions(analysis.rawTop3)
         setIsUndetermined(analysis.isUndetermined)
@@ -195,9 +205,12 @@ export default function Page() {
           rawTopClass: analysis.rawTop3[0]?.className ?? null,
         })
       } catch (err) {
+        if (requestId !== inferenceRequestIdRef.current) return
         setPredictionError((err as Error)?.message || defaultErrorMessage)
       } finally {
-        setIsPredicting(false)
+        if (requestId === inferenceRequestIdRef.current) {
+          setIsPredicting(false)
+        }
       }
     },
     [ensureModelReady, t.predictionError],
@@ -380,6 +393,7 @@ export default function Page() {
     setIsUploadPanelOpen(false)
 
     await runPredictFromUrl(url, 'local')
+    e.target.value = ''
   }
 
   async function loadFromImageUrl() {
@@ -969,9 +983,12 @@ function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageE
         data[pixelIndex + spatialSize] = g
         data[pixelIndex + spatialSize * 2] = b
       } else {
-        data[pixelIndex] = r / 255
-        data[pixelIndex + spatialSize] = g / 255
-        data[pixelIndex + spatialSize * 2] = b / 255
+        const rNorm = r / 255
+        const gNorm = g / 255
+        const bNorm = b / 255
+        data[pixelIndex] = (rNorm - IMAGENET_MEAN[0]) / IMAGENET_STD[0]
+        data[pixelIndex + spatialSize] = (gNorm - IMAGENET_MEAN[1]) / IMAGENET_STD[1]
+        data[pixelIndex + spatialSize * 2] = (bNorm - IMAGENET_MEAN[2]) / IMAGENET_STD[2]
       }
     }
   } else {
@@ -986,9 +1003,12 @@ function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageE
         data[base + 1] = g
         data[base + 2] = b
       } else {
-        data[base] = r / 255
-        data[base + 1] = g / 255
-        data[base + 2] = b / 255
+        const rNorm = r / 255
+        const gNorm = g / 255
+        const bNorm = b / 255
+        data[base] = (rNorm - IMAGENET_MEAN[0]) / IMAGENET_STD[0]
+        data[base + 1] = (gNorm - IMAGENET_MEAN[1]) / IMAGENET_STD[1]
+        data[base + 2] = (bNorm - IMAGENET_MEAN[2]) / IMAGENET_STD[2]
       }
     }
   }
