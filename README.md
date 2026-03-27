@@ -29,8 +29,10 @@ npm run start
 请将模型文件放到：
 
 - `public/model/model.onnx`
+- `public/model/classes.txt`（推荐，按训练时类别顺序每行一个类名）
 
 前端默认加载地址：`/model/model.onnx?v=model-v1`
+前端会优先读取 `/model/classes.txt` 作为输出索引到类别名的映射；若缺失则回退到内置 12 类顺序。
 
 ## 数据来源
 

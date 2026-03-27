@@ -21,7 +21,7 @@ type PredictionItem = {
   confidence: number
 }
 type RawPredictionItem = {
-  className: ObjectClassKey
+  className: string
   confidence: number
 }
 type PredictionAnalysis = {
@@ -42,12 +42,14 @@ type InferenceLog = {
   topLabel: LabelKey | null
   topConfidence: number
   undetermined: boolean
-  rawTopClass: ObjectClassKey | null
+  rawTopClass: string | null
 }
 
 const MODEL_PATH = '/model/model.onnx'
 const MODEL_VERSION = 'model-v1'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
+const CLASSES_PATH = '/model/classes.txt'
+const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
 const LOG_LIMIT = 200
@@ -60,7 +62,7 @@ const supportedLabels: LabelKey[] = [
   'Hazardous waste',
   'Bulk waste',
 ]
-const supportedObjectClasses: ObjectClassKey[] = [
+const fallbackObjectClasses: string[] = [
   'battery',
   'biological',
   'brown-glass',
@@ -102,6 +104,7 @@ export default function Page() {
 
   const ortRef = useRef<OrtModule | null>(null)
   const modelRef = useRef<OrtSession | null>(null)
+  const objectClassesRef = useRef<string[]>(fallbackObjectClasses)
   const displayBlobUrlRef = useRef<string | null>(null)
   const capturedBlobUrlRef = useRef<string | null>(null)
   const inferenceRequestIdRef = useRef(0)
@@ -158,6 +161,7 @@ export default function Page() {
         executionProviders: supportsWebGpu ? ['webgpu', 'wasm'] : ['wasm'],
       })
       modelRef.current = model
+      objectClassesRef.current = await loadClassNames(VERSIONED_CLASSES_PATH)
       setModelStatus('ready')
       setModelLoadProgress(100)
       return true
@@ -187,7 +191,12 @@ export default function Page() {
           width: img.naturalWidth || img.width,
           height: img.naturalHeight || img.height,
         })
-        const analysis = await predictTop3(ortRef.current, modelRef.current, img)
+        const analysis = await predictTop3(
+          ortRef.current,
+          modelRef.current,
+          img,
+          objectClassesRef.current,
+        )
         if (requestId !== inferenceRequestIdRef.current) return
         setTopPredictions(analysis.mappedTop3)
         setRawTopPredictions(analysis.rawTop3)
@@ -637,7 +646,7 @@ export default function Page() {
               </p>
               {topRawClass && topRawMappedLabel ? (
                 <p className="confidence-line">
-                  <strong>{t.rawLabels[topRawClass]}</strong>
+                  <strong>{getRawClassLabel(topRawClass, t)}</strong>
                   {' -> '}
                   <strong>{t.labels[topRawMappedLabel]}</strong>
                 </p>
@@ -675,7 +684,7 @@ export default function Page() {
               </p>
               {topRawClass && topRawMappedLabel ? (
                 <p className="confidence-line">
-                  <strong>{t.rawLabels[topRawClass]}</strong>
+                  <strong>{getRawClassLabel(topRawClass, t)}</strong>
                   {' -> '}
                   <strong>{t.labels[topRawMappedLabel]}</strong>
                 </p>
@@ -702,7 +711,7 @@ export default function Page() {
                   {rawTopPredictions.map((item) => (
                     <div key={item.className} className="ranking-item">
                       <div className="ranking-meta">
-                        <span>{t.rawLabels[item.className]}</span>
+                        <span>{getRawClassLabel(item.className, t)}</span>
                         <strong>{formatConfidence(item.confidence)}</strong>
                       </div>
                       <div className="ranking-track">
@@ -713,9 +722,9 @@ export default function Page() {
                 </div>
               ) : null}
 
-              <div className="guide-card">
-                <h3>{t.reasonTitle}</h3>
-                <p>{getPredictionReason(rawTopPredictions[0]?.className, t)}</p>
+                <div className="guide-card">
+                  <h3>{t.reasonTitle}</h3>
+                  <p>{getPredictionReason(rawTopPredictions[0]?.className, t)}</p>
               </div>
             </>
           ) : (
@@ -930,7 +939,12 @@ async function readImage(src: string): Promise<HTMLImageElement> {
   return image
 }
 
-async function predictTop3(ort: OrtModule, model: OrtSession, source: HTMLImageElement): Promise<PredictionAnalysis> {
+async function predictTop3(
+  ort: OrtModule,
+  model: OrtSession,
+  source: HTMLImageElement,
+  objectClasses: string[],
+): Promise<PredictionAnalysis> {
   const inputTensor = createInputTensor(ort, model, source)
   const outputMap = await model.run({ [inputTensor.name]: inputTensor.tensor })
   const primaryOutputName = model.outputNames[0]
@@ -941,8 +955,8 @@ async function predictTop3(ort: OrtModule, model: OrtSession, source: HTMLImageE
   const rawScores = Array.from(outputData, (value) => Number(value))
   const scores = normalizeScores(rawScores)
 
-  const mappedTop3 = mapScoresToTrashPredictions(scores)
-  const rawTop3 = getRawObjectTop3(scores)
+  const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
+  const rawTop3 = getRawObjectTop3(scores, objectClasses)
   const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD
 
   return {
@@ -1093,7 +1107,7 @@ function mapToTrash(className: string): LabelKey {
   return 'General waste'
 }
 
-function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
+function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]): PredictionItem[] {
   // Case A: model directly outputs 5 trash classes
   if (scores.length === supportedLabels.length) {
     return scores
@@ -1116,7 +1130,7 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
   }
 
   scores.forEach((score, index) => {
-    const className = supportedObjectClasses[index] ?? 'trash'
+    const className = objectClasses[index] ?? 'trash'
     const trashLabel = mapToTrash(className)
     bucket[trashLabel] = Math.max(bucket[trashLabel], score)
   })
@@ -1127,21 +1141,47 @@ function mapScoresToTrashPredictions(scores: number[]): PredictionItem[] {
     .slice(0, 3)
 }
 
-function getRawObjectTop3(scores: number[]): RawPredictionItem[] {
-  if (scores.length !== supportedObjectClasses.length) return []
+function getRawObjectTop3(scores: number[], objectClasses: string[]): RawPredictionItem[] {
+  if (scores.length !== objectClasses.length) return []
 
   return scores
     .map((confidence, index) => ({
-      className: supportedObjectClasses[index] ?? 'trash',
+      className: objectClasses[index] ?? 'trash',
       confidence,
     }))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
 }
 
-function getPredictionReason(className: ObjectClassKey | undefined, t: Localized) {
+function getPredictionReason(className: string | undefined, t: Localized) {
   if (!className) return t.undeterminedHint
-  return t.reasonHints[className]
+  if (isKnownObjectClass(className)) return t.reasonHints[className]
+  return t.undeterminedHint
+}
+
+function getRawClassLabel(className: string, t: Localized) {
+  if (isKnownObjectClass(className)) return t.rawLabels[className]
+  return className
+}
+
+function isKnownObjectClass(className: string): className is ObjectClassKey {
+  return fallbackObjectClasses.includes(className)
+}
+
+async function loadClassNames(url: string) {
+  try {
+    const response = await fetch(url, { cache: 'no-store' })
+    if (!response.ok) return fallbackObjectClasses
+    const text = await response.text()
+    const parsed = text
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (!parsed.length) return fallbackObjectClasses
+    return parsed
+  } catch {
+    return fallbackObjectClasses
+  }
 }
 
 function appendInferenceLog(entry: InferenceLog) {
