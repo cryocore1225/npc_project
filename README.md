@@ -56,13 +56,21 @@ npm run start
 
 ## 分类体系（韩国 5 大类）
 
-页面最终输出为 5 类：
+页面最终输出为 5 类（中韩）：
 
-1. `General waste`（一般垃圾 / 종량제）
-2. `Food waste`（厨余垃圾 / 음식물）
-3. `Recyclables`（可回收物 / 재활용）
-4. `Hazardous waste`（有害/专项回收）
-5. `Bulk waste`（大件垃圾 / 申报）
+1. 一般垃圾 / 종량제
+2. 厨余垃圾 / 음식물
+3. 可回收物 / 재활용
+4. 有害/专项回收 / 유해·전용 수거
+5. 大件垃圾 / 대형폐기물(申报)
+
+内部分类键（用于模型映射）：
+
+1. `General waste`
+2. `Food waste`
+3. `Recyclables`
+4. `Hazardous waste`
+5. `Bulk waste`
 
 ## 模型输出兼容
 
