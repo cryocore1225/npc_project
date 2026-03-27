@@ -29,6 +29,12 @@ type PredictionAnalysis = {
   rawTop3: RawPredictionItem[]
   isUndetermined: boolean
 }
+type PreprocessMode = 'auto' | 'imagenet' | 'zeroToOne' | 'negOneToOne'
+type InputMetadataLike = {
+  isTensor?: boolean
+  type?: string
+  shape?: Array<number | string | bigint | boolean | null | undefined>
+}
 type PreviewMeta = {
   width: number
   height: number
@@ -50,6 +56,8 @@ const MODEL_VERSION = 'model-v1'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const CLASSES_PATH = '/model/classes.txt'
 const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
+const MODEL_METADATA_PATH = '/model/metadata.json'
+const VERSIONED_MODEL_METADATA_PATH = `${MODEL_METADATA_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
 const LOW_CONFIDENCE_THRESHOLD_12CLASS = 0.2
@@ -106,6 +114,7 @@ export default function Page() {
   const ortRef = useRef<OrtModule | null>(null)
   const modelRef = useRef<OrtSession | null>(null)
   const objectClassesRef = useRef<string[]>(fallbackObjectClasses)
+  const preprocessModeRef = useRef<PreprocessMode>('auto')
   const displayBlobUrlRef = useRef<string | null>(null)
   const capturedBlobUrlRef = useRef<string | null>(null)
   const inferenceRequestIdRef = useRef(0)
@@ -162,7 +171,16 @@ export default function Page() {
         executionProviders: ['wasm'],
       })
       modelRef.current = model
-      objectClassesRef.current = await loadClassNames(VERSIONED_CLASSES_PATH)
+      const [classNames, modelHints] = await Promise.all([
+        loadClassNames(VERSIONED_CLASSES_PATH),
+        loadModelHints(VERSIONED_MODEL_METADATA_PATH),
+      ])
+      objectClassesRef.current = classNames.length
+        ? classNames
+        : modelHints.labels.length
+        ? modelHints.labels
+        : fallbackObjectClasses
+      preprocessModeRef.current = modelHints.preprocess
       setModelStatus('ready')
       setModelLoadProgress(100)
       return true
@@ -197,6 +215,7 @@ export default function Page() {
           modelRef.current,
           img,
           objectClassesRef.current,
+          preprocessModeRef.current,
         )
         if (requestId !== inferenceRequestIdRef.current) return
         setTopPredictions(analysis.mappedTop3)
@@ -945,8 +964,9 @@ async function predictTop3(
   model: OrtSession,
   source: HTMLImageElement,
   objectClasses: string[],
+  preprocessMode: PreprocessMode,
 ): Promise<PredictionAnalysis> {
-  const inputTensor = createInputTensor(ort, model, source)
+  const inputTensor = createInputTensor(ort, model, source, preprocessMode)
   const outputMap = await model.run({ [inputTensor.name]: inputTensor.tensor })
   const primaryOutputName = model.outputNames[0]
   const output = primaryOutputName ? outputMap[primaryOutputName] : undefined
@@ -959,7 +979,7 @@ async function predictTop3(
   const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
   const rawTop3 = getRawObjectTop3(scores, objectClasses)
   const confidenceThreshold =
-    scores.length === objectClasses.length ? LOW_CONFIDENCE_THRESHOLD_12CLASS : LOW_CONFIDENCE_THRESHOLD
+    scores.length > supportedLabels.length ? LOW_CONFIDENCE_THRESHOLD_12CLASS : LOW_CONFIDENCE_THRESHOLD
   const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < confidenceThreshold
 
   return {
@@ -969,18 +989,28 @@ async function predictTop3(
   }
 }
 
-function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageElement) {
+function createInputTensor(
+  ort: OrtModule,
+  model: OrtSession,
+  source: HTMLImageElement,
+  preprocessMode: PreprocessMode,
+) {
   const inputName = model.inputNames[0]
   if (!inputName) {
     throw new Error('Model input not found.')
   }
 
-  const metadata = model.inputMetadata[0]
+  const metadataCollection = model.inputMetadata as unknown as
+    | Array<InputMetadataLike>
+    | Record<string, InputMetadataLike>
+  const metadata = Array.isArray(metadataCollection)
+    ? metadataCollection[0]
+    : metadataCollection[inputName]
   if (!metadata || !metadata.isTensor) {
     throw new Error('Model input metadata is invalid.')
   }
 
-  const dimensions = metadata.shape
+  const dimensions = metadata.shape ?? []
   const isNchw = Number(dimensions[1]) === 3
   const isNhwc = Number(dimensions[3]) === 3
   const layout: 'nchw' | 'nhwc' = isNhwc && !isNchw ? 'nhwc' : 'nchw'
@@ -999,6 +1029,7 @@ function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageE
   const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight).data
   const expectsUint8 = metadata.type === 'uint8'
   const tensorType: 'float32' | 'uint8' = expectsUint8 ? 'uint8' : 'float32'
+  const effectivePreprocess = resolvePreprocessMode(preprocessMode, layout, tensorType)
   const channelCount = 3
   const spatialSize = targetWidth * targetHeight
   const data =
@@ -1017,12 +1048,15 @@ function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageE
         data[pixelIndex + spatialSize] = g
         data[pixelIndex + spatialSize * 2] = b
       } else {
-        const rNorm = r / 255
-        const gNorm = g / 255
-        const bNorm = b / 255
-        data[pixelIndex] = (rNorm - IMAGENET_MEAN[0]) / IMAGENET_STD[0]
-        data[pixelIndex + spatialSize] = (gNorm - IMAGENET_MEAN[1]) / IMAGENET_STD[1]
-        data[pixelIndex + spatialSize * 2] = (bNorm - IMAGENET_MEAN[2]) / IMAGENET_STD[2]
+        const [rValue, gValue, bValue] = preprocessRgb(
+          r,
+          g,
+          b,
+          effectivePreprocess,
+        )
+        data[pixelIndex] = rValue
+        data[pixelIndex + spatialSize] = gValue
+        data[pixelIndex + spatialSize * 2] = bValue
       }
     }
   } else {
@@ -1037,12 +1071,15 @@ function createInputTensor(ort: OrtModule, model: OrtSession, source: HTMLImageE
         data[base + 1] = g
         data[base + 2] = b
       } else {
-        const rNorm = r / 255
-        const gNorm = g / 255
-        const bNorm = b / 255
-        data[base] = (rNorm - IMAGENET_MEAN[0]) / IMAGENET_STD[0]
-        data[base + 1] = (gNorm - IMAGENET_MEAN[1]) / IMAGENET_STD[1]
-        data[base + 2] = (bNorm - IMAGENET_MEAN[2]) / IMAGENET_STD[2]
+        const [rValue, gValue, bValue] = preprocessRgb(
+          r,
+          g,
+          b,
+          effectivePreprocess,
+        )
+        data[base] = rValue
+        data[base + 1] = gValue
+        data[base + 2] = bValue
       }
     }
   }
@@ -1061,6 +1098,36 @@ function getDimensionNumber(value: number | string | bigint | boolean | null | u
     if (Number.isFinite(parsed) && parsed > 0) return parsed
   }
   return fallback
+}
+
+function resolvePreprocessMode(
+  requested: PreprocessMode,
+  layout: 'nchw' | 'nhwc',
+  tensorType: 'float32' | 'uint8',
+) {
+  if (tensorType === 'uint8') return 'zeroToOne' as const
+  if (requested !== 'auto') return requested
+  return layout === 'nhwc' ? 'negOneToOne' : 'imagenet'
+}
+
+function preprocessRgb(
+  r: number,
+  g: number,
+  b: number,
+  mode: Exclude<PreprocessMode, 'auto'>,
+): [number, number, number] {
+  const rNorm = r / 255
+  const gNorm = g / 255
+  const bNorm = b / 255
+  if (mode === 'zeroToOne') return [rNorm, gNorm, bNorm]
+  if (mode === 'negOneToOne') {
+    return [rNorm * 2 - 1, gNorm * 2 - 1, bNorm * 2 - 1]
+  }
+  return [
+    (rNorm - IMAGENET_MEAN[0]) / IMAGENET_STD[0],
+    (gNorm - IMAGENET_MEAN[1]) / IMAGENET_STD[1],
+    (bNorm - IMAGENET_MEAN[2]) / IMAGENET_STD[2],
+  ]
 }
 
 function normalizeScores(scores: number[]) {
@@ -1115,7 +1182,7 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
   if (scores.length === supportedLabels.length) {
     return scores
       .map((confidence, index) => ({
-        label: supportedLabels[index] ?? 'General waste',
+        label: getDirectOutputLabel(objectClasses[index], index),
         confidence,
       }))
       .sort((a, b) => b.confidence - a.confidence)
@@ -1161,6 +1228,55 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
     .slice(0, 3)
 }
 
+function getDirectOutputLabel(className: string | undefined, index: number): LabelKey {
+  if (className) {
+    const mapped = mapLabelAliasToSupported(className)
+    if (mapped) return mapped
+  }
+  return supportedLabels[index] ?? 'General waste'
+}
+
+function mapLabelAliasToSupported(label: string): LabelKey | null {
+  const normalized = label.trim().toLowerCase()
+  if (!normalized) return null
+  if (
+    normalized.includes('recycl') ||
+    normalized.includes('재활용') ||
+    normalized.includes('可回收')
+  ) {
+    return 'Recyclables'
+  }
+  if (
+    normalized.includes('food') ||
+    normalized.includes('음식물') ||
+    normalized.includes('厨余')
+  ) {
+    return 'Food waste'
+  }
+  if (
+    normalized.includes('hazard') ||
+    normalized.includes('유해') ||
+    normalized.includes('有害')
+  ) {
+    return 'Hazardous waste'
+  }
+  if (
+    normalized.includes('bulk') ||
+    normalized.includes('대형') ||
+    normalized.includes('大件')
+  ) {
+    return 'Bulk waste'
+  }
+  if (
+    normalized.includes('general') ||
+    normalized.includes('종량제') ||
+    normalized.includes('一般')
+  ) {
+    return 'General waste'
+  }
+  return null
+}
+
 function getRawObjectTop3(scores: number[], objectClasses: string[]): RawPredictionItem[] {
   if (scores.length !== objectClasses.length) return []
 
@@ -1191,16 +1307,40 @@ function isKnownObjectClass(className: string): className is ObjectClassKey {
 async function loadClassNames(url: string) {
   try {
     const response = await fetch(url, { cache: 'no-store' })
-    if (!response.ok) return fallbackObjectClasses
+    if (!response.ok) return []
     const text = await response.text()
     const parsed = text
       .split(/\r?\n/g)
       .map((line) => line.trim())
       .filter(Boolean)
-    if (!parsed.length) return fallbackObjectClasses
+    if (!parsed.length) return []
     return parsed
   } catch {
-    return fallbackObjectClasses
+    return []
+  }
+}
+
+async function loadModelHints(url: string): Promise<{
+  labels: string[]
+  preprocess: PreprocessMode
+}> {
+  try {
+    const response = await fetch(url, { cache: 'no-store' })
+    if (!response.ok) return { labels: [], preprocess: 'auto' }
+    const payload = (await response.json()) as {
+      labels?: unknown
+      packageName?: unknown
+    }
+    const labels = Array.isArray(payload.labels)
+      ? payload.labels
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean)
+      : []
+    const packageName = typeof payload.packageName === 'string' ? payload.packageName : ''
+    const preprocess = packageName.includes('teachablemachine') ? 'negOneToOne' : 'auto'
+    return { labels, preprocess }
+  } catch {
+    return { labels: [], preprocess: 'auto' }
   }
 }
 
