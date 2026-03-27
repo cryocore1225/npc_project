@@ -52,6 +52,7 @@ const CLASSES_PATH = '/model/classes.txt'
 const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
+const LOW_CONFIDENCE_THRESHOLD_12CLASS = 0.2
 const LOG_LIMIT = 200
 const IMAGENET_MEAN = [0.485, 0.456, 0.406] as const
 const IMAGENET_STD = [0.229, 0.224, 0.225] as const
@@ -957,7 +958,9 @@ async function predictTop3(
 
   const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
   const rawTop3 = getRawObjectTop3(scores, objectClasses)
-  const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD
+  const confidenceThreshold =
+    scores.length === objectClasses.length ? LOW_CONFIDENCE_THRESHOLD_12CLASS : LOW_CONFIDENCE_THRESHOLD
+  const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < confidenceThreshold
 
   return {
     mappedTop3,
@@ -1119,9 +1122,16 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
       .slice(0, 3)
   }
 
-  // Case B: model outputs object classes (12 classes), then map to trash buckets.
-  // Use max per bucket (instead of sum) to avoid biasing buckets that own more source classes.
+  // Case B: model outputs object classes (eg. 12 classes), then map to trash buckets.
+  // Use mean-per-bucket to avoid biasing buckets with many source classes.
   const bucket: Record<LabelKey, number> = {
+    'General waste': 0,
+    'Food waste': 0,
+    Recyclables: 0,
+    'Hazardous waste': 0,
+    'Bulk waste': 0,
+  }
+  const bucketCount: Record<LabelKey, number> = {
     'General waste': 0,
     'Food waste': 0,
     Recyclables: 0,
@@ -1132,11 +1142,21 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
   scores.forEach((score, index) => {
     const className = objectClasses[index] ?? 'trash'
     const trashLabel = mapToTrash(className)
-    bucket[trashLabel] = Math.max(bucket[trashLabel], score)
+    bucket[trashLabel] += score
+    bucketCount[trashLabel] += 1
   })
 
-  return supportedLabels
-    .map((label) => ({ label, confidence: bucket[label] }))
+  const averaged = supportedLabels.map((label) => ({
+    label,
+    confidence: bucketCount[label] > 0 ? bucket[label] / bucketCount[label] : 0,
+  }))
+  const total = averaged.reduce((sum, item) => sum + item.confidence, 0)
+  const normalized =
+    total > 0
+      ? averaged.map((item) => ({ ...item, confidence: item.confidence / total }))
+      : averaged
+
+  return normalized
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
 }
