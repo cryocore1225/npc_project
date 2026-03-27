@@ -157,9 +157,9 @@ export default function Page() {
       ortRef.current = ort
       setModelLoadProgress(45)
 
-      const supportsWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator
       const model = await ort.InferenceSession.create(VERSIONED_MODEL_PATH, {
-        executionProviders: supportsWebGpu ? ['webgpu', 'wasm'] : ['wasm'],
+        // Prefer stability over speed: WebGPU can produce inconsistent results on some browsers/drivers.
+        executionProviders: ['wasm'],
       })
       modelRef.current = model
       objectClassesRef.current = await loadClassNames(VERSIONED_CLASSES_PATH)
