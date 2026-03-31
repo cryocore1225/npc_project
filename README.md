@@ -1,11 +1,11 @@
 ﻿# NPC 垃圾分类器
 
-基于 Next.js + ONNX Runtime Web 的浏览器端垃圾分类演示项目。
+基于 Next.js + TensorFlow.js 的浏览器端垃圾分类演示项目。
 
 ## 项目能力
 
 - 图片输入：拍照 / 本地上传 / URL / 剪贴板
-- 模型推理：浏览器端 ONNX Runtime Web
+- 模型推理：浏览器端 TensorFlow.js
 - 结果展示：Top 3、低置信度兜底、投放建议
 - 管理面板：`/admin` 本地推理日志查看、筛选、CSV 导出
 - 中韩双语：中文 / 한국어
@@ -28,17 +28,20 @@ npm run start
 
 请将模型文件放到：
 
-- `public/model/model.onnx`
-- `public/model/classes.txt`（推荐，按训练时类别顺序每行一个类名）
+- `public/model/model.json`
+- `public/model/group1-shard*.bin`
+- `public/model/labels.txt`（推荐，按训练时类别顺序每行一个类名）
 
-前端默认加载地址：`/model/model.onnx?v=model-v1`
-前端会优先读取 `/model/classes.txt` 作为输出索引到类别名的映射；若缺失则回退到内置 12 类顺序。
+前端默认加载地址：`/model/model.json?v=model-v1`
+前端会优先读取 `/model/labels.txt` 作为输出索引到类别名的映射；若缺失则回退到内置 12 类顺序。
 
 ## 数据来源
 
-训练数据来源于 Kaggle：
+训练数据推荐优先使用（1/2/4）：
 
-- https://www.kaggle.com/datasets/mostafaabla/garbage-classification
+- 1) Garbage Classification V2: https://www.kaggle.com/datasets/sumn2u/garbage-classification-v2
+- 2) waste_pictures: https://www.kaggle.com/datasets/wangziang/waste-pictures
+- 4) RealWaste: https://archive.ics.uci.edu/dataset/908/realwaste
 
 ## 数据增强（离线）
 
@@ -154,7 +157,7 @@ npm run start
 
 检查：
 
-- `public/model/model.onnx` 是否存在
+- `public/model/model.json` 和 `public/model/group1-shard*.bin` 是否存在
 - 输出长度是否符合 5 类直出或 12 类映射
 
 ### 2) 摄像头打不开

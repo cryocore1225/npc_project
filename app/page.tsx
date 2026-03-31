@@ -13,8 +13,8 @@ import {
 
 type ModelStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'error'
 type UploadSource = 'local' | 'url' | 'clipboard'
-type OrtModule = typeof import('onnxruntime-web')
-type OrtSession = import('onnxruntime-web').InferenceSession
+type TfModule = typeof import('@tensorflow/tfjs')
+type TfGraphModel = import('@tensorflow/tfjs').GraphModel
 
 type PredictionItem = {
   label: LabelKey
@@ -28,11 +28,6 @@ type PredictionAnalysis = {
   mappedTop3: PredictionItem[]
   rawTop3: RawPredictionItem[]
   isUndetermined: boolean
-}
-type InputMetadataLike = {
-  isTensor?: boolean
-  type?: string
-  shape?: Array<number | string | bigint | boolean | null | undefined>
 }
 type PreviewMeta = {
   width: number
@@ -50,17 +45,15 @@ type InferenceLog = {
   rawTopClass: string | null
 }
 
-const MODEL_PATH = '/model/model.onnx'
+const MODEL_PATH = '/model/model.json'
 const MODEL_VERSION = 'model-v1'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
-const CLASSES_PATH = '/model/classes.txt'
+const CLASSES_PATH = '/model/labels.txt'
 const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
 const LOW_CONFIDENCE_THRESHOLD_12CLASS = 0.2
 const LOG_LIMIT = 200
-const IMAGENET_MEAN = [0.485, 0.456, 0.406] as const
-const IMAGENET_STD = [0.229, 0.224, 0.225] as const
 const supportedLabels: LabelKey[] = [
   'General waste',
   'Food waste',
@@ -108,8 +101,8 @@ export default function Page() {
   const [isUndetermined, setIsUndetermined] = useState(false)
   const [modelLoadProgress, setModelLoadProgress] = useState(0)
 
-  const ortRef = useRef<OrtModule | null>(null)
-  const modelRef = useRef<OrtSession | null>(null)
+  const tfRef = useRef<TfModule | null>(null)
+  const modelRef = useRef<TfGraphModel | null>(null)
   const objectClassesRef = useRef<string[]>(fallbackObjectClasses)
   const displayBlobUrlRef = useRef<string | null>(null)
   const capturedBlobUrlRef = useRef<string | null>(null)
@@ -149,7 +142,7 @@ export default function Page() {
   }, [])
 
   const ensureModelReady = useCallback(async () => {
-    if (modelRef.current && ortRef.current) {
+    if (modelRef.current && tfRef.current) {
       setModelStatus((prev) => (prev === 'ready' ? prev : 'ready'))
       return true
     }
@@ -158,14 +151,12 @@ export default function Page() {
     setModelLoadProgress(0)
     try {
       setModelLoadProgress(15)
-      const ort = ortRef.current ?? (await import('onnxruntime-web'))
-      ortRef.current = ort
+      const tf = tfRef.current ?? (await import('@tensorflow/tfjs'))
+      tfRef.current = tf
+      await tf.ready()
       setModelLoadProgress(45)
 
-      const model = await ort.InferenceSession.create(VERSIONED_MODEL_PATH, {
-        // Prefer stability over speed: WebGPU can produce inconsistent results on some browsers/drivers.
-        executionProviders: ['wasm'],
-      })
+      const model = await tf.loadGraphModel(VERSIONED_MODEL_PATH)
       modelRef.current = model
       const classNames = await loadClassNames(VERSIONED_CLASSES_PATH)
       const outputClassCount = getPrimaryOutputClassCount(model)
@@ -193,7 +184,7 @@ export default function Page() {
       setRawTopPredictions([])
       setIsUndetermined(false)
       const modelReady = await ensureModelReady()
-      if (!modelReady || !modelRef.current || !ortRef.current) return
+      if (!modelReady || !modelRef.current || !tfRef.current) return
       setIsPredicting(true)
       const startedAt = performance.now()
       try {
@@ -203,7 +194,7 @@ export default function Page() {
           height: img.naturalHeight || img.height,
         })
         const analysis = await predictTop3(
-          ortRef.current,
+          tfRef.current,
           modelRef.current,
           img,
           objectClassesRef.current,
@@ -951,19 +942,12 @@ async function readImage(src: string): Promise<HTMLImageElement> {
 }
 
 async function predictTop3(
-  ort: OrtModule,
-  model: OrtSession,
+  tf: TfModule,
+  model: TfGraphModel,
   source: HTMLImageElement,
   objectClasses: string[],
 ): Promise<PredictionAnalysis> {
-  const inputTensor = createInputTensor(ort, model, source)
-  const outputMap = await model.run({ [inputTensor.name]: inputTensor.tensor })
-  const primaryOutputName = model.outputNames[0]
-  const output = primaryOutputName ? outputMap[primaryOutputName] : undefined
-  if (!output || !('data' in output)) throw new Error('Unexpected model output.')
-  const outputData = output.data as ArrayLike<number> | undefined
-  if (!outputData) throw new Error('Unexpected model output.')
-  const rawScores = Array.from(outputData, (value) => Number(value))
+  const rawScores = await runTfjsInference(tf, model, source)
   const scores = normalizeScores(rawScores)
 
   const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
@@ -979,128 +963,39 @@ async function predictTop3(
   }
 }
 
-function createInputTensor(
-  ort: OrtModule,
-  model: OrtSession,
+async function runTfjsInference(
+  tf: TfModule,
+  model: TfGraphModel,
   source: HTMLImageElement,
 ) {
-  const inputName = model.inputNames[0]
-  if (!inputName) {
-    throw new Error('Model input not found.')
-  }
+  const inputShape = model.inputs[0]?.shape ?? [null, IMAGE_SIZE, IMAGE_SIZE, 3]
+  const targetHeight = Number(inputShape[1]) || IMAGE_SIZE
+  const targetWidth = Number(inputShape[2]) || IMAGE_SIZE
 
-  const metadataCollection = model.inputMetadata as unknown as
-    | Array<InputMetadataLike>
-    | Record<string, InputMetadataLike>
-  const metadata = Array.isArray(metadataCollection)
-    ? metadataCollection[0]
-    : metadataCollection[inputName]
-  if (!metadata || !metadata.isTensor) {
-    throw new Error('Model input metadata is invalid.')
-  }
-
-  const dimensions = metadata.shape ?? []
-  const isNchw = Number(dimensions[1]) === 3
-  const isNhwc = Number(dimensions[3]) === 3
-  const layout: 'nchw' | 'nhwc' = isNhwc && !isNchw ? 'nhwc' : 'nchw'
-  const targetHeight = getDimensionNumber(layout === 'nchw' ? dimensions[2] : dimensions[1], IMAGE_SIZE)
-  const targetWidth = getDimensionNumber(layout === 'nchw' ? dimensions[3] : dimensions[2], IMAGE_SIZE)
-
-  const canvas = document.createElement('canvas')
-  canvas.width = targetWidth
-  canvas.height = targetHeight
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new Error('Canvas context unavailable.')
-  }
-  ctx.drawImage(source, 0, 0, targetWidth, targetHeight)
-
-  const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight).data
-  const expectsUint8 = metadata.type === 'uint8'
-  const tensorType: 'float32' | 'uint8' = expectsUint8 ? 'uint8' : 'float32'
-  const effectivePreprocess = resolvePreprocessMode(layout, tensorType)
-  const channelCount = 3
-  const spatialSize = targetWidth * targetHeight
-  const data =
-    tensorType === 'uint8'
-      ? new Uint8Array(spatialSize * channelCount)
-      : new Float32Array(spatialSize * channelCount)
-
-  if (layout === 'nchw') {
-    for (let pixelIndex = 0; pixelIndex < spatialSize; pixelIndex += 1) {
-      const offset = pixelIndex * 4
-      const r = imageData[offset] ?? 0
-      const g = imageData[offset + 1] ?? 0
-      const b = imageData[offset + 2] ?? 0
-      if (tensorType === 'uint8') {
-        data[pixelIndex] = r
-        data[pixelIndex + spatialSize] = g
-        data[pixelIndex + spatialSize * 2] = b
-      } else {
-        const [rValue, gValue, bValue] = preprocessRgb(
-          r,
-          g,
-          b,
-          effectivePreprocess,
-        )
-        data[pixelIndex] = rValue
-        data[pixelIndex + spatialSize] = gValue
-        data[pixelIndex + spatialSize * 2] = bValue
-      }
+  const logits = tf.tidy(() => {
+    const pixels = tf.browser.fromPixels(source)
+    const resized = tf.image.resizeBilinear(pixels, [targetHeight, targetWidth])
+    const batched = resized.toFloat().expandDims(0)
+    const prediction = model.predict(batched)
+    const outTensor = Array.isArray(prediction) ? prediction[0] : prediction
+    if (!outTensor || typeof (outTensor as { data?: unknown }).data !== 'function') {
+      throw new Error('Unexpected model output.')
     }
-  } else {
-    for (let pixelIndex = 0; pixelIndex < spatialSize; pixelIndex += 1) {
-      const offset = pixelIndex * 4
-      const base = pixelIndex * channelCount
-      const r = imageData[offset] ?? 0
-      const g = imageData[offset + 1] ?? 0
-      const b = imageData[offset + 2] ?? 0
-      if (tensorType === 'uint8') {
-        data[base] = r
-        data[base + 1] = g
-        data[base + 2] = b
-      } else {
-        const [rValue, gValue, bValue] = preprocessRgb(
-          r,
-          g,
-          b,
-          effectivePreprocess,
-        )
-        data[base] = rValue
-        data[base + 1] = gValue
-        data[base + 2] = bValue
-      }
-    }
-  }
+    return tf.clone(outTensor as import('@tensorflow/tfjs').Tensor)
+  })
 
-  const shape = layout === 'nchw' ? [1, 3, targetHeight, targetWidth] : [1, targetHeight, targetWidth, 3]
-  return {
-    name: inputName,
-    tensor: new ort.Tensor(tensorType, data, shape),
+  try {
+    const outputData = await logits.data()
+    return Array.from(outputData, (value) => Number(value))
+  } finally {
+    logits.dispose()
   }
 }
 
-function getDimensionNumber(value: number | string | bigint | boolean | null | undefined, fallback: number) {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-  return fallback
-}
-
-function getPrimaryOutputClassCount(model: OrtSession) {
-  const outputName = model.outputNames[0]
-  if (!outputName) return -1
-  const metadataCollection = model.outputMetadata as unknown as
-    | Array<InputMetadataLike>
-    | Record<string, InputMetadataLike>
-  const metadata = Array.isArray(metadataCollection)
-    ? metadataCollection[0]
-    : metadataCollection[outputName]
-  const shape = metadata?.shape ?? []
-  const lastDimension = shape.length ? shape[shape.length - 1] : undefined
-  return getDimensionNumber(lastDimension, -1)
+function getPrimaryOutputClassCount(model: TfGraphModel) {
+  const outputShape = model.outputs[0]?.shape ?? []
+  const lastDimension = outputShape.length ? outputShape[outputShape.length - 1] : undefined
+  return typeof lastDimension === 'number' && Number.isFinite(lastDimension) ? lastDimension : -1
 }
 
 function resolveClassNamesForModelOutput(
@@ -1114,31 +1009,6 @@ function resolveClassNamesForModelOutput(
   }
   if (fromClassesTxt.length) return fromClassesTxt
   return fallbackObjectClasses
-}
-
-function resolvePreprocessMode(
-  layout: 'nchw' | 'nhwc',
-  tensorType: 'float32' | 'uint8',
-) {
-  if (tensorType === 'uint8') return 'zeroToOne' as const
-  return layout === 'nhwc' ? 'zeroToOne' : 'imagenet'
-}
-
-function preprocessRgb(
-  r: number,
-  g: number,
-  b: number,
-  mode: 'imagenet' | 'zeroToOne',
-): [number, number, number] {
-  const rNorm = r / 255
-  const gNorm = g / 255
-  const bNorm = b / 255
-  if (mode === 'zeroToOne') return [rNorm, gNorm, bNorm]
-  return [
-    (rNorm - IMAGENET_MEAN[0]) / IMAGENET_STD[0],
-    (gNorm - IMAGENET_MEAN[1]) / IMAGENET_STD[1],
-    (bNorm - IMAGENET_MEAN[2]) / IMAGENET_STD[2],
-  ]
 }
 
 function normalizeScores(scores: number[]) {

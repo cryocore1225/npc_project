@@ -1,0 +1,4 @@
+﻿tensorflow>=2.13,<2.18
+tensorflowjs>=4.20
+pillow>=10.0
+numpy>=1.24
