@@ -46,7 +46,7 @@ type InferenceLog = {
 }
 
 const MODEL_PATH = '/model/model.json'
-const MODEL_VERSION = 'model-v1'
+const MODEL_VERSION = 'model-v2'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const CLASSES_PATH = '/model/labels.txt'
 const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
