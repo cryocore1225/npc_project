@@ -43,6 +43,35 @@ npm run start
 - 2) waste_pictures: https://www.kaggle.com/datasets/wangziang/waste-pictures
 - 4) RealWaste: https://archive.ics.uci.edu/dataset/908/realwaste
 
+## 训练策略（粗分类 + 细分类）
+
+建议使用两阶段训练，而不是把全部数据直接混成一个模型。
+
+### 粗分类（大类）
+
+- 目标：先判断垃圾属于哪一类大类（如 `plastic/paper/metal/trash`）
+- 数据：`garbage_classification + realwaste`
+- 作用：先把大方向判准，模型更稳
+
+### 细分类（小类）
+
+- 目标：在细粒度上识别具体物品（如 `plasticbottle/plasticbag/toothpick`）
+- 数据：`train`（34 类）
+- 作用：在粗分类之后提供更细的识别结果
+
+### 为什么这样做
+
+- `garbage_classification/realwaste` 是大类标签
+- `train` 是小类标签
+- 两者不在同一层级，直接混训会产生标签冲突，通常会拉低效果
+
+一句话：
+
+- 粗分类 = 先分桶
+- 细分类 = 再识别桶内具体物品
+
+训练脚本见 `ml/README.md`（包含一键流程与分步命令）。
+
 ## 数据增强（离线）
 
 训练前对原始图片做了离线增强，按类别目录遍历并生成以下变体：
