@@ -27,10 +27,26 @@ def copy_split(files: list[Path], train_ratio: float, val_ratio: float, seed: in
     return train_files, val_files, test_files
 
 
+def make_unique_target_path(target_dir: Path, src: Path) -> Path:
+    base_name = src.stem
+    ext = src.suffix
+    candidate = target_dir / f"{base_name}{ext}"
+    if not candidate.exists():
+        return candidate
+
+    i = 1
+    while True:
+        candidate = target_dir / f"{base_name}__dup{i}{ext}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
 def copy_files(files: list[Path], target_dir: Path) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     for src in files:
-        shutil.copy2(src, target_dir / src.name)
+        target = make_unique_target_path(target_dir, src)
+        shutil.copy2(src, target)
 
 
 def main() -> None:

@@ -6,6 +6,7 @@ import tensorflow as tf
 
 
 AUTOTUNE = tf.data.AUTOTUNE
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def make_datasets(train_dir: Path, val_dir: Path, image_size: int, batch_size: int):
@@ -64,6 +65,27 @@ def build_model(num_classes: int, image_size: int, dropout: float):
     return model, base_model
 
 
+def compute_class_weight_from_dir(train_dir: Path, class_names: list[str]) -> dict[int, float]:
+    counts: list[int] = []
+    for class_name in class_names:
+        class_dir = train_dir / class_name
+        image_count = sum(
+            1
+            for p in class_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+        )
+        if image_count <= 0:
+            raise RuntimeError(f"Class '{class_name}' has 0 training images in {class_dir}")
+        counts.append(image_count)
+
+    total = sum(counts)
+    num_classes = len(counts)
+    return {
+        idx: float(total / (num_classes * count))
+        for idx, count in enumerate(counts)
+    }
+
+
 def fine_tune(
     model: tf.keras.Model,
     base_model: tf.keras.Model,
@@ -72,6 +94,7 @@ def fine_tune(
     epochs_finetune: int,
     fine_tune_at: int,
     output_dir: Path,
+    class_weight: dict[int, float] | None = None,
 ):
     if epochs_finetune <= 0:
         return None
@@ -102,6 +125,7 @@ def fine_tune(
         validation_data=val_ds,
         epochs=epochs_finetune,
         callbacks=callbacks,
+        class_weight=class_weight,
     )
     return history
 
@@ -128,6 +152,11 @@ def main() -> None:
     parser.add_argument("--epochs-finetune", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.35)
     parser.add_argument("--fine-tune-at", type=int, default=120)
+    parser.add_argument(
+        "--disable-class-weight",
+        action="store_true",
+        help="Disable automatic class weighting for imbalanced datasets.",
+    )
     args = parser.parse_args()
 
     train_dir = args.data_root / "train"
@@ -143,6 +172,15 @@ def main() -> None:
         image_size=args.image_size,
         batch_size=args.batch_size,
     )
+
+    class_weight = None
+    if not args.disable_class_weight:
+        class_weight = compute_class_weight_from_dir(train_dir, class_names)
+        readable_class_weight = {class_names[idx]: weight for idx, weight in class_weight.items()}
+        (args.output_dir / "class_weights.json").write_text(
+            json.dumps(readable_class_weight, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     model, base_model = build_model(
         num_classes=len(class_names),
@@ -172,6 +210,7 @@ def main() -> None:
         validation_data=val_ds,
         epochs=args.epochs_head,
         callbacks=callbacks,
+        class_weight=class_weight,
     )
 
     history_finetune = fine_tune(
@@ -182,6 +221,7 @@ def main() -> None:
         epochs_finetune=args.epochs_finetune,
         fine_tune_at=args.fine_tune_at,
         output_dir=args.output_dir,
+        class_weight=class_weight,
     )
 
     final_model_dir = args.output_dir / "saved_model"
@@ -203,6 +243,8 @@ def main() -> None:
     print(f"Classes: {len(class_names)}")
     print(f"SavedModel: {final_model_dir}")
     print(f"Labels: {args.output_dir / 'labels.txt'}")
+    if class_weight is not None:
+        print(f"Class weights: {args.output_dir / 'class_weights.json'}")
     print(f"Validation metrics: {metrics_map}")
 
 
