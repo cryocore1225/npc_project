@@ -17,7 +17,7 @@ type TfModule = typeof import('@tensorflow/tfjs')
 type TfGraphModel = import('@tensorflow/tfjs').GraphModel
 
 type PredictionItem = {
-  label: LabelKey
+  label: string
   confidence: number
 }
 type RawPredictionItem = {
@@ -39,7 +39,7 @@ type InferenceLog = {
   timestamp: number
   source: InputSource
   latencyMs: number
-  topLabel: LabelKey | null
+  topLabel: string | null
   topConfidence: number
   undetermined: boolean
   rawTopClass: string | null
@@ -477,7 +477,6 @@ export default function Page() {
   }
 
   const topRawClass = rawTopPredictions[0]?.className
-  const topRawMappedLabel = topRawClass ? mapToTrash(topRawClass) : null
 
   return (
     <main className="page-shell">
@@ -640,17 +639,15 @@ export default function Page() {
           {mainResult ? (
             <>
               <div className={`result-chip chip-${mainResult.label.toLowerCase().replace(' ', '-')}`}>
-                {t.labels[mainResult.label]}
+                {getDisplayLabel(mainResult.label, t)}
               </div>
 
               <p className="confidence-line">
                 {t.confidence} <strong>{formatConfidence(mainResult.confidence)}</strong>
               </p>
-              {topRawClass && topRawMappedLabel ? (
+              {topRawClass ? (
                 <p className="confidence-line">
                   <strong>{getRawClassLabel(topRawClass, t)}</strong>
-                  {' -> '}
-                  <strong>{t.labels[topRawMappedLabel]}</strong>
                 </p>
               ) : null}
 
@@ -659,7 +656,7 @@ export default function Page() {
                 {topPredictions.map((item) => (
                   <div key={item.label} className="ranking-item">
                     <div className="ranking-meta">
-                      <span>{t.labels[item.label]}</span>
+                      <span>{getDisplayLabel(item.label, t)}</span>
                       <strong>{formatConfidence(item.confidence)}</strong>
                     </div>
                     <div className="ranking-track">
@@ -671,7 +668,7 @@ export default function Page() {
 
               <div className="guide-card">
                 <h3>{t.guideTitle}</h3>
-                <p>{t.descriptions[mainResult.label]}</p>
+                <p>{getDescriptionText(mainResult.label, t)}</p>
               </div>
             </>
           ) : isUndetermined && topPredictions.length ? (
@@ -684,11 +681,9 @@ export default function Page() {
                 {t.lowConfidenceHint}
                 <strong>{formatConfidence(topPredictions[0]?.confidence ?? 0)}</strong>
               </p>
-              {topRawClass && topRawMappedLabel ? (
+              {topRawClass ? (
                 <p className="confidence-line">
                   <strong>{getRawClassLabel(topRawClass, t)}</strong>
-                  {' -> '}
-                  <strong>{t.labels[topRawMappedLabel]}</strong>
                 </p>
               ) : null}
 
@@ -697,7 +692,7 @@ export default function Page() {
                 {topPredictions.map((item) => (
                   <div key={item.label} className="ranking-item">
                     <div className="ranking-meta">
-                      <span>{t.labels[item.label]}</span>
+                      <span>{getDisplayLabel(item.label, t)}</span>
                       <strong>{formatConfidence(item.confidence)}</strong>
                     </div>
                     <div className="ranking-track">
@@ -1037,27 +1032,6 @@ function normalizeScores(scores: number[]) {
   return expScores.map((value) => value / expSum)
 }
 
-function mapToTrash(className: string): LabelKey {
-  const normalized = className.trim().toLowerCase()
-
-  if (
-    normalized === 'brown-glass' ||
-    normalized === 'cardboard' ||
-    normalized === 'green-glass' ||
-    normalized === 'metal' ||
-    normalized === 'paper' ||
-    normalized === 'plastic' ||
-    normalized === 'white-glass'
-  ) {
-    return 'Recyclables'
-  }
-  if (normalized === 'biological') return 'Food waste'
-  if (normalized === 'battery') return 'Hazardous waste'
-  if (normalized === 'clothes' || normalized === 'shoes') return 'Recyclables'
-  if (normalized === 'trash') return 'General waste'
-  return 'General waste'
-}
-
 function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]): PredictionItem[] {
   // Case A: model directly outputs 5 trash classes
   if (scores.length === supportedLabels.length) {
@@ -1070,41 +1044,12 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
       .slice(0, 3)
   }
 
-  // Case B: model outputs object classes (eg. 12 classes), then map to trash buckets.
-  // Use mean-per-bucket to avoid biasing buckets with many source classes.
-  const bucket: Record<LabelKey, number> = {
-    'General waste': 0,
-    'Food waste': 0,
-    Recyclables: 0,
-    'Hazardous waste': 0,
-    'Bulk waste': 0,
-  }
-  const bucketCount: Record<LabelKey, number> = {
-    'General waste': 0,
-    'Food waste': 0,
-    Recyclables: 0,
-    'Hazardous waste': 0,
-    'Bulk waste': 0,
-  }
-
-  scores.forEach((score, index) => {
-    const className = objectClasses[index] ?? 'trash'
-    const trashLabel = mapToTrash(className)
-    bucket[trashLabel] += score
-    bucketCount[trashLabel] += 1
-  })
-
-  const averaged = supportedLabels.map((label) => ({
-    label,
-    confidence: bucketCount[label] > 0 ? bucket[label] / bucketCount[label] : 0,
-  }))
-  const total = averaged.reduce((sum, item) => sum + item.confidence, 0)
-  const normalized =
-    total > 0
-      ? averaged.map((item) => ({ ...item, confidence: item.confidence / total }))
-      : averaged
-
-  return normalized
+  // Case B: model outputs N object classes; keep direct class predictions.
+  return scores
+    .map((confidence, index) => ({
+      label: objectClasses[index] ?? `class-${index}`,
+      confidence,
+    }))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
 }
@@ -1159,6 +1104,20 @@ function getPredictionReason(className: string | undefined, t: Localized) {
 function getRawClassLabel(className: string, t: Localized) {
   if (isKnownObjectClass(className)) return t.rawLabels[className]
   return className
+}
+
+function getDisplayLabel(label: string, t: Localized) {
+  if (isSupportedLabelKey(label)) return t.labels[label]
+  return label
+}
+
+function getDescriptionText(label: string, t: Localized) {
+  if (isSupportedLabelKey(label)) return t.descriptions[label]
+  return t.undeterminedHint
+}
+
+function isSupportedLabelKey(label: string): label is LabelKey {
+  return supportedLabels.includes(label as LabelKey)
 }
 
 function isKnownObjectClass(className: string): className is ObjectClassKey {

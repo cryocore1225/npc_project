@@ -7,8 +7,6 @@ import {
   LANG_STORAGE_KEY,
   LOG_STORAGE_KEY,
   type Lang,
-  type LabelKey,
-  type ObjectClassKey,
 } from '../i18n/shared'
 
 type InputSource = 'local' | 'url' | 'clipboard' | 'camera'
@@ -17,10 +15,10 @@ type InferenceLog = {
   timestamp: number
   source: InputSource
   latencyMs: number
-  topLabel: LabelKey | null
+  topLabel: string | null
   topConfidence: number
   undetermined: boolean
-  rawTopClass: ObjectClassKey | null
+  rawTopClass: string | null
 }
 
 export default function AdminPage() {
