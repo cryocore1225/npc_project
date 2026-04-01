@@ -1,109 +1,152 @@
 ﻿# NPC 垃圾分类器
 
-基于 Next.js + TensorFlow.js 的浏览器端图片分类项目。
+Next.js + TensorFlow.js 浏览器端图片分类项目。
 
-## 项目能力
+## 1. 项目定位
+
+本仓库（`npc_project`）只负责前端推理与展示：
 
 - 图片输入：拍照 / 本地上传 / URL / 剪贴板
-- 模型推理：浏览器端 TensorFlow.js
-- 结果展示：Top 3、置信度、原始类别名
-- 管理面板：`/admin`（本地日志筛选、CSV 导出）
+- 浏览器端模型推理：TensorFlow.js
+- 结果展示：Top3、置信度、原始类别名
+- 管理页：`/admin` 本地日志筛选与 CSV 导出
 - 多语言：中文 / 한국어
 
-## 快速启动
+训练与数据处理放在独立仓库：`D:\Code\Python\Docker_project`。
+
+## 2. 快速启动
 
 ```bash
 npm install
 npm run dev
 ```
 
-生产：
+生产构建：
 
 ```bash
 npm run build
 npm run start
 ```
 
-## 模型文件规范
+## 3. 模型文件放置规范
 
-将 TFJS 模型放到：
+把 TFJS 模型放到：
 
 - `public/model/model.json`
 - `public/model/group1-shard*.bin`
 - `public/model/labels.txt`
 
+前端加载地址：
+
+- `/model/model.json?v=MODEL_VERSION`
+
 说明：
 
-- 前端默认加载：`/model/model.json?v=MODEL_VERSION`
-- `labels.txt` 每行一个类别名，顺序必须和训练输出一致
-- 当模型输出不是固定 5 类时，页面会直接显示原始类别名（不强制映射）
+- `labels.txt` 一行一个类别名，顺序必须与训练输出一致。
+- 页面支持任意类别数模型：不是固定 5 类时会直接显示原始类别名。
 
-## 与训练项目联动
+## 4. 与训练仓库联动（推荐）
 
-训练项目目录：`D:\Code\Python\Docker_project`
+训练仓库：`D:\Code\Python\Docker_project`
 
-推荐训练命令（3个数据目录全部参与，按原始类别直接多分类）：
+推荐训练命令（三目录参与，按原始类别训练）：
 
 ```powershell
-cd D:\Code\Python\Docker_project
+cd /d D:\Code\Python\Docker_project
 docker compose run --rm my_app python /opt/project/ml/run_pipeline.py --use-all-three --all-classes --low-memory
 ```
 
-训练完成后复制模型到本项目：
+训练结束后，同步模型到前端：
 
 ```powershell
 Copy-Item -Force D:\Code\Python\Docker_project\ml\artifacts\all_classes\tfjs_model\* D:\Code\npc_project\public\model\
 ```
 
-然后修改版本号防止浏览器缓存旧模型：
+再更新前端缓存版本：
 
 - 文件：`app/page.tsx`
-- 常量：`MODEL_VERSION`
+- 常量：`MODEL_VERSION = 'model-vX'`
 
-## 输出兼容策略
+## 5. Python 数据/训练代码说明（Docker_project）
 
-前端兼容两类输出：
+Python 相关代码在：`D:\Code\Python\Docker_project\ml`
 
-1. 固定 5 类输出
-- 直接使用 5 类标签展示
+核心脚本：
 
-2. 任意 N 类输出（推荐）
-- 按 `labels.txt` 显示 Top3 原始类别
-- 不再强制回落到旧的固定映射类别
+- `run_pipeline.py`
+  - 训练入口脚本，串联“数据准备 -> 切分 -> 训练 -> 导出 TFJS”。
+  - 常用参数：
+    - `--use-all-three`：使用三个数据目录
+    - `--all-classes`：不做12类映射，按原始类别训练
+    - `--low-memory`：低内存参数（更稳）
 
-## 日志面板（/admin）
+- `prepare_all3_raw_dataset.py`
+  - 三数据源全类别合并（推荐模式）。
+  - 会规范化类别名，并复制到统一目录。
 
-日志存储在 `localStorage`（键：`npc_inference_logs_v1`），字段包括：
+- `prepare_all3_coarse_dataset.py`
+  - 三数据源映射到 12 类再训练（兼容旧模式）。
 
-- `timestamp`
-- `source`
-- `topLabel`
-- `topConfidence`
-- `undetermined`
-- `rawTopClass`
-- `latencyMs`
+- `prepare_coarse_dataset.py`
+  - 仅 `garbage_classification + realwaste` 的粗类合并脚本。
 
-支持：刷新、筛选、导出 CSV、清空。
+- `split_dataset.py`
+  - 把统一数据切分成 `train/val/test`。
 
-## 常见问题
+- `train.py`
+  - TensorFlow 训练脚本。
+  - 已支持：
+    - 坏图扫描与清单导出（`bad_images_report.json/txt`）
+    - 坏图跳过不中断
+    - repeat + 动态 `steps_per_epoch`，避免提前结束
+    - SavedModel 稳健导出
 
-### 1) 模型加载失败
+- `export_tfjs.py`
+  - 将 SavedModel 导出为 TFJS 模型。
+
+训练产物目录：
+
+- 全类别：`ml/artifacts/all_classes`
+- 12类：`ml/artifacts/coarse`
+
+中间数据目录（每次带时间戳，不覆盖历史）：
+
+- `E:\dataset\pipeline_runs\YYYYMMDD_HHMMSS\...`
+
+## 6. 当前仓库目录职责
+
+- `app/`：页面与业务逻辑（模型加载、推理、展示）
+- `public/model/`：前端推理模型文件
+- `app/i18n/`：中韩文案
+- `app/admin/`：日志管理页
+
+## 7. 常见问题
+
+### 7.1 `no configuration file provided: not found`
+
+在 `cmd` 里请用：
+
+```cmd
+cd /d D:\Code\Python\Docker_project
+```
+
+### 7.2 模型加载失败
 
 检查：
 
 - `public/model/model.json` 是否存在
 - `group1-shard*.bin` 是否齐全
-- `labels.txt` 是否与模型输出维度一致
+- `labels.txt` 是否与输出维度匹配
 
-### 2) 页面仍显示旧模型结果
+### 7.3 页面仍是旧模型结果
 
-- 更新 `app/page.tsx` 的 `MODEL_VERSION`
-- 强刷浏览器缓存后重试
+- 修改 `MODEL_VERSION`
+- 强刷浏览器缓存
 
-### 3) 摄像头打不开
+### 7.4 摄像头打不开
 
 检查：
 
-- 浏览器权限
-- HTTPS 或 localhost
-- 是否被其他应用占用
+- 权限是否允许
+- 是否 HTTPS / localhost
+- 是否被其他程序占用
