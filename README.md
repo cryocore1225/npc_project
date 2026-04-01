@@ -1,184 +1,89 @@
 ﻿# NPC 垃圾分类器
 
-基于 Next.js + TensorFlow.js 的浏览器端垃圾分类演示项目。
+基于 Next.js + TensorFlow.js 的浏览器端图片分类项目。
 
 ## 项目能力
 
 - 图片输入：拍照 / 本地上传 / URL / 剪贴板
 - 模型推理：浏览器端 TensorFlow.js
-- 结果展示：Top 3、低置信度兜底、投放建议
-- 管理面板：`/admin` 本地推理日志查看、筛选、CSV 导出
-- 中韩双语：中文 / 한국어
+- 结果展示：Top 3、置信度、原始类别名
+- 管理面板：`/admin`（本地日志筛选、CSV 导出）
+- 多语言：中文 / 한국어
 
-## 运行方式
+## 快速启动
 
 ```bash
 npm install
 npm run dev
 ```
 
-生产构建：
+生产：
 
 ```bash
 npm run build
 npm run start
 ```
 
-## 模型文件位置
+## 模型文件规范
 
-请将模型文件放到：
+将 TFJS 模型放到：
 
 - `public/model/model.json`
 - `public/model/group1-shard*.bin`
-- `public/model/labels.txt`（推荐，按训练时类别顺序每行一个类名）
+- `public/model/labels.txt`
 
-前端默认加载地址：`/model/model.json?v=model-v1`
-前端会优先读取 `/model/labels.txt` 作为输出索引到类别名的映射；若缺失则回退到内置 12 类顺序。
+说明：
 
-## 数据来源
+- 前端默认加载：`/model/model.json?v=MODEL_VERSION`
+- `labels.txt` 每行一个类别名，顺序必须和训练输出一致
+- 当模型输出不是固定 5 类时，页面会直接显示原始类别名（不强制映射）
 
-训练数据推荐优先使用（1/2/4）：
+## 与训练项目联动
 
-- 1) Garbage Classification V2: https://www.kaggle.com/datasets/sumn2u/garbage-classification-v2
-- 2) waste_pictures: https://www.kaggle.com/datasets/wangziang/waste-pictures
-- 4) RealWaste: https://archive.ics.uci.edu/dataset/908/realwaste
+训练项目目录：`D:\Code\Python\Docker_project`
 
-## 训练策略（粗分类 + 细分类）
+推荐训练命令（3个数据目录全部参与，按原始类别直接多分类）：
 
-建议使用两阶段训练，而不是把全部数据直接混成一个模型。
+```powershell
+cd D:\Code\Python\Docker_project
+docker compose run --rm my_app python /opt/project/ml/run_pipeline.py --use-all-three --all-classes --low-memory
+```
 
-### 粗分类（大类）
+训练完成后复制模型到本项目：
 
-- 目标：先判断垃圾属于哪一类大类（如 `plastic/paper/metal/trash`）
-- 数据：`garbage_classification + realwaste`
-- 作用：先把大方向判准，模型更稳
+```powershell
+Copy-Item -Force D:\Code\Python\Docker_project\ml\artifacts\all_classes\tfjs_model\* D:\Code\npc_project\public\model\
+```
 
-### 细分类（小类）
+然后修改版本号防止浏览器缓存旧模型：
 
-- 目标：在细粒度上识别具体物品（如 `plasticbottle/plasticbag/toothpick`）
-- 数据：`train`（34 类）
-- 作用：在粗分类之后提供更细的识别结果
+- 文件：`app/page.tsx`
+- 常量：`MODEL_VERSION`
 
-### 为什么这样做
+## 输出兼容策略
 
-- `garbage_classification/realwaste` 是大类标签
-- `train` 是小类标签
-- 两者不在同一层级，直接混训会产生标签冲突，通常会拉低效果
+前端兼容两类输出：
 
-一句话：
+1. 固定 5 类输出
+- 直接使用 5 类标签展示
 
-- 粗分类 = 先分桶
-- 细分类 = 再识别桶内具体物品
+2. 任意 N 类输出（推荐）
+- 按 `labels.txt` 显示 Top3 原始类别
+- 不再强制回落到旧的固定映射类别
 
-训练脚本见 `ml/README.md`（包含一键流程与分步命令）。
+## 日志面板（/admin）
 
-## 数据增强（离线）
-
-训练前对原始图片做了离线增强，按类别目录遍历并生成以下变体：
-
-- 原图：`_orig`
-- 水平翻转：`_flip`
-- 旋转：`_rot15`、`_rot-15`
-- 亮度增强/减弱：`_bright`、`_dark`
-- 高斯模糊：`_blur`
-
-输出目录结构保持 `ImageFolder` 格式（`输出根目录/类别名/*.jpg`），文件名规则为：
-
-- `{class_name}_{count:04d}_{suffix}.jpg`
-
-可直接用于 PyTorch `datasets.ImageFolder` 训练。
-
-## 分类体系（韩国 5 大类）
-
-页面最终输出为 5 类（中韩）：
-
-1. 一般垃圾 / 종량제
-2. 厨余垃圾 / 음식물
-3. 可回收物 / 재활용
-4. 有害/专项回收 / 유해·전용 수거
-5. 大件垃圾 / 대형폐기물(申报)
-
-内部分类键（用于模型映射）：
-
-1. `General waste`
-2. `Food waste`
-3. `Recyclables`
-4. `Hazardous waste`
-5. `Bulk waste`
-
-## 模型输出兼容
-
-项目兼容两种模型输出格式：
-
-### A) 5 类直出模型
-
-输出长度为 5，顺序：
-
-1. `General waste`
-2. `Food waste`
-3. `Recyclables`
-4. `Hazardous waste`
-5. `Bulk waste`
-
-### B) 12 类物体模型（映射到 5 类）
-
-输出长度为 12，顺序必须为：
-
-1. `battery`
-2. `biological`
-3. `brown-glass`
-4. `cardboard`
-5. `clothes`
-6. `green-glass`
-7. `metal`
-8. `paper`
-9. `plastic`
-10. `shoes`
-11. `trash`
-12. `white-glass`
-
-映射规则：
-
-- `brown-glass / cardboard / green-glass / metal / paper / plastic / white-glass` -> `Recyclables`
-- `biological` -> `Food waste`
-- `battery` -> `Hazardous waste`
-- `clothes / shoes` -> `Recyclables`
-- `trash`（及其他兜底）-> `General waste`
-
-## 韩国投放方法（页面文案对应）
-
-- `General waste`：使用 종량제 垃圾袋，避免混入可回收/厨余/有害物。
-- `Food waste`：先沥干水分并去包装，再投 음식물 专用桶/袋。
-- `Recyclables`：按材质分开（纸/塑料/金属/玻璃/衣物鞋类），尽量清洗并压缩体积。
-- `Hazardous waste`：废电池、废灯管等投放到专项回收箱。
-- `Bulk waste`：家具家电等需先申报缴费后按预约排出。
-
-## 置信度策略
-
-- 阈值：`LOW_CONFIDENCE_THRESHOLD = 0.45`
-- 当 Top1 低于阈值时标记为 `undetermined`
-
-## 日志面板（`/admin`）
-
-日志存储在 `localStorage`：`npc_inference_logs_v1`
-
-主要字段：
+日志存储在 `localStorage`（键：`npc_inference_logs_v1`），字段包括：
 
 - `timestamp`
-- `source`（camera/local/url/clipboard）
+- `source`
 - `topLabel`
 - `topConfidence`
 - `undetermined`
 - `rawTopClass`
 - `latencyMs`
 
-支持功能：
-
-- 汇总统计
-- 来源筛选
-- 仅看 `undetermined`
-- CSV 导出
-- 一键清空
+支持：刷新、筛选、导出 CSV、清空。
 
 ## 常见问题
 
@@ -186,20 +91,19 @@ npm run start
 
 检查：
 
-- `public/model/model.json` 和 `public/model/group1-shard*.bin` 是否存在
-- 输出长度是否符合 5 类直出或 12 类映射
+- `public/model/model.json` 是否存在
+- `group1-shard*.bin` 是否齐全
+- `labels.txt` 是否与模型输出维度一致
 
-### 2) 摄像头打不开
+### 2) 页面仍显示旧模型结果
+
+- 更新 `app/page.tsx` 的 `MODEL_VERSION`
+- 强刷浏览器缓存后重试
+
+### 3) 摄像头打不开
 
 检查：
 
-- 浏览器权限是否允许
-- 是否在 HTTPS 或 localhost 环境
-- 摄像头是否被其他应用占用
-
-### 3) 开发缓存导致异常
-
-```bash
-cmd /c "rmdir /s /q .next"
-npm run dev
-```
+- 浏览器权限
+- HTTPS 或 localhost
+- 是否被其他应用占用
