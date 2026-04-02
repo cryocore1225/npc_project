@@ -8,7 +8,6 @@ import {
   LOG_STORAGE_KEY,
   type Lang,
   type LabelKey,
-  type ObjectClassKey,
 } from './i18n/shared'
 
 type ModelStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'error'
@@ -1230,13 +1229,11 @@ function getRawObjectTop3(scores: number[], objectClasses: string[]): RawPredict
 
 function getPredictionReason(className: string | undefined, t: Localized) {
   if (!className) return t.undeterminedHint
-  if (isKnownObjectClass(className)) return t.reasonHints[className]
-  return t.undeterminedHint
+  return lookupLocalizedByClass(t.reasonHints, className) ?? t.undeterminedHint
 }
 
 function getRawClassLabel(className: string, t: Localized) {
-  if (isKnownObjectClass(className)) return t.rawLabels[className]
-  return className
+  return lookupLocalizedByClass(t.rawLabels, className) ?? className
 }
 
 function getDisplayLabel(label: string, t: Localized) {
@@ -1253,8 +1250,14 @@ function isSupportedLabelKey(label: string): label is LabelKey {
   return supportedLabels.includes(label as LabelKey)
 }
 
-function isKnownObjectClass(className: string): className is ObjectClassKey {
-  return fallbackObjectClasses.includes(className)
+function lookupLocalizedByClass(map: Record<string, string>, className: string) {
+  const raw = className.trim().toLowerCase()
+  if (!raw) return null
+
+  const dashed = raw.replace(/[_\s]+/g, '-')
+  const compact = raw.replace(/[^a-z0-9]+/g, '')
+
+  return map[raw] ?? map[dashed] ?? map[compact] ?? null
 }
 
 async function loadClassNames(url: string) {
