@@ -113,6 +113,25 @@ Python 相关代码在：`D:\Code\Python\Docker_project\ml`
 
 - `E:\dataset\pipeline_runs\YYYYMMDD_HHMMSS\...`
 
+### 数据来源备注（2026-04-02）
+
+当前可确认来源：
+
+- `realwaste-main/RealWaste`：RealWaste 数据集（`E:\dataset\realwaste-main\README.md` 可查）
+  - https://www.mdpi.com/2078-2489/14/12/633
+
+当前待补来源链接（本地无元数据）：
+
+- `E:\dataset\garbage_classification`（12类）
+- `E:\dataset\train`（34类）
+
+已补充到的下载线索：
+
+- `garbage_classification`：Kaggle 临时签名下载地址（你提供，2026-03-31 生成，短期有效）
+  - `https://storage.googleapis.com/kaggle-data-sets/390259/753037/bundle/archive.zip?...`
+
+如果你确认了原始下载页，建议把链接补在这里，便于后续复现和合规说明。
+
 ## 6. 当前仓库目录职责
 
 - `app/`：页面与业务逻辑（模型加载、推理、展示）

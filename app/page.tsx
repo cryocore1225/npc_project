@@ -45,7 +45,7 @@ type InferenceLog = {
 }
 
 const MODEL_PATH = '/model/model.json'
-const MODEL_VERSION = 'model-v3'
+const MODEL_VERSION = 'model-v4'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const CLASSES_PATH = '/model/labels.txt'
 const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
@@ -73,7 +73,9 @@ const fallbackObjectClasses: string[] = [
   'trash',
   'white-glass',
 ]
+const BACKGROUND_CLASS_TOKENS = new Set(['background'])
 const RAW_CLASS_TO_SUPPORTED: Record<string, LabelKey> = {
+  aerosol: 'Hazardous waste',
   battery: 'Hazardous waste',
   bulb: 'Hazardous waste',
   tabletcapsule: 'Hazardous waste',
@@ -90,6 +92,7 @@ const RAW_CLASS_TO_SUPPORTED: Record<string, LabelKey> = {
   watermelonrind: 'Food waste',
   traditionalchinesemedicine: 'Food waste',
   foodorganics: 'Food waste',
+  foodwaste: 'Food waste',
   vegetation: 'Food waste',
 
   cardboard: 'Recyclables',
@@ -127,6 +130,62 @@ const RAW_CLASS_TO_SUPPORTED: Record<string, LabelKey> = {
   napkin: 'General waste',
   toothpick: 'General waste',
   miscellaneoustrash: 'General waste',
+  cigarette: 'General waste',
+  disposablefoodcontainer: 'General waste',
+  foamcup: 'General waste',
+  foamfoodcontainer: 'General waste',
+  garbagebag: 'General waste',
+  ropestrings: 'General waste',
+  tissues: 'General waste',
+  unlabeledlitter: 'General waste',
+
+  aluminiumblisterpack: 'Recyclables',
+  aluminiumfoil: 'Recyclables',
+  brokenglass: 'Recyclables',
+  cardedblisterpack: 'Recyclables',
+  clearplasticbottle: 'Recyclables',
+  corrugatedcarton: 'Recyclables',
+  crisppacket: 'Recyclables',
+  disposableplasticcup: 'Recyclables',
+  drinkcan: 'Recyclables',
+  drinkcarton: 'Recyclables',
+  eggcarton: 'Recyclables',
+  foodcan: 'Recyclables',
+  glasscup: 'Recyclables',
+  glassjar: 'Recyclables',
+  magazinepaper: 'Recyclables',
+  mealcarton: 'Recyclables',
+  metalbottlecap: 'Recyclables',
+  metallid: 'Recyclables',
+  normalpaper: 'Recyclables',
+  othercarton: 'Recyclables',
+  otherplastic: 'Recyclables',
+  otherplasticbottle: 'Recyclables',
+  otherplasticcontainer: 'Recyclables',
+  otherplasticcup: 'Recyclables',
+  otherplasticwrapper: 'Recyclables',
+  paperbag: 'Recyclables',
+  papercup: 'Recyclables',
+  paperstraw: 'Recyclables',
+  pizzabox: 'Recyclables',
+  plasticbottlecap: 'Recyclables',
+  plasticfilm: 'Recyclables',
+  plasticglooves: 'Recyclables',
+  plasticlid: 'Recyclables',
+  plasticstraw: 'Recyclables',
+  plasticutensils: 'Recyclables',
+  polypropylenebag: 'Recyclables',
+  poptab: 'Recyclables',
+  scrapmetal: 'Recyclables',
+  singleusecarrierbag: 'Recyclables',
+  sixpackrings: 'Recyclables',
+  spreadtub: 'Recyclables',
+  squeezabletube: 'Recyclables',
+  styrofoampiece: 'Recyclables',
+  toilettube: 'Recyclables',
+  tupperware: 'Recyclables',
+  wrappingpaper: 'Recyclables',
+  shoe: 'Recyclables',
 }
 
 export default function Page() {
@@ -998,9 +1057,11 @@ async function predictTop3(
   const rawScores = await runTfjsInference(tf, model, source)
   const scores = normalizeScores(rawScores)
 
-  const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
   const rawTop3 = getRawObjectTop3(scores, objectClasses)
-  const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD
+  const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
+  const isBackgroundTop1 = isBackgroundClass(rawTop3[0]?.className)
+  const isUndetermined =
+    isBackgroundTop1 || (mappedTop3[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD
 
   return {
     mappedTop3,
@@ -1107,6 +1168,7 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
   scores.forEach((confidence, index) => {
     const className = objectClasses[index] ?? `class-${index}`
     const mappedLabel = mapObjectClassToSupported(className)
+    if (!mappedLabel) return
     groupedScores[mappedLabel] += confidence
   })
 
@@ -1148,9 +1210,10 @@ function mapLabelAliasToSupported(label: string): LabelKey | null {
   return null
 }
 
-function mapObjectClassToSupported(className: string): LabelKey {
+function mapObjectClassToSupported(className: string): LabelKey | null {
   const normalized = normalizeClassToken(className)
   if (!normalized) return 'General waste'
+  if (BACKGROUND_CLASS_TOKENS.has(normalized)) return null
 
   const direct = RAW_CLASS_TO_SUPPORTED[normalized]
   if (direct) return direct
@@ -1213,6 +1276,11 @@ function mapObjectClassToSupported(className: string): LabelKey {
 
 function normalizeClassToken(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function isBackgroundClass(className: string | undefined) {
+  if (!className) return false
+  return BACKGROUND_CLASS_TOKENS.has(normalizeClassToken(className))
 }
 
 function getRawObjectTop3(scores: number[], objectClasses: string[]): RawPredictionItem[] {
