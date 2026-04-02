@@ -46,13 +46,12 @@ type InferenceLog = {
 }
 
 const MODEL_PATH = '/model/model.json'
-const MODEL_VERSION = 'model-v2'
+const MODEL_VERSION = 'model-v3'
 const VERSIONED_MODEL_PATH = `${MODEL_PATH}?v=${MODEL_VERSION}`
 const CLASSES_PATH = '/model/labels.txt'
 const VERSIONED_CLASSES_PATH = `${CLASSES_PATH}?v=${MODEL_VERSION}`
 const IMAGE_SIZE = 224
 const LOW_CONFIDENCE_THRESHOLD = 0.45
-const LOW_CONFIDENCE_THRESHOLD_12CLASS = 0.2
 const LOG_LIMIT = 200
 const supportedLabels: LabelKey[] = [
   'General waste',
@@ -75,6 +74,61 @@ const fallbackObjectClasses: string[] = [
   'trash',
   'white-glass',
 ]
+const RAW_CLASS_TO_SUPPORTED: Record<string, LabelKey> = {
+  battery: 'Hazardous waste',
+  bulb: 'Hazardous waste',
+  tabletcapsule: 'Hazardous waste',
+  thermometer: 'Hazardous waste',
+  xlight: 'Hazardous waste',
+  medicinebottle: 'Hazardous waste',
+  nailpolishbottle: 'Hazardous waste',
+  pesticidebottle: 'Hazardous waste',
+
+  biological: 'Food waste',
+  leftovers: 'Food waste',
+  bread: 'Food waste',
+  nut: 'Food waste',
+  watermelonrind: 'Food waste',
+  traditionalchinesemedicine: 'Food waste',
+  foodorganics: 'Food waste',
+  vegetation: 'Food waste',
+
+  cardboard: 'Recyclables',
+  carton: 'Recyclables',
+  milkbox: 'Recyclables',
+  glass: 'Recyclables',
+  glassbottle: 'Recyclables',
+  brownglass: 'Recyclables',
+  greenglass: 'Recyclables',
+  whiteglass: 'Recyclables',
+  metal: 'Recyclables',
+  cans: 'Recyclables',
+  paper: 'Recyclables',
+  leaflet: 'Recyclables',
+  newspaper: 'Recyclables',
+  plastic: 'Recyclables',
+  plasticbag: 'Recyclables',
+  plasticbottle: 'Recyclables',
+  plasticene: 'Recyclables',
+  penholder: 'Recyclables',
+  toothbrush: 'Recyclables',
+  toothpastetube: 'Recyclables',
+  clothes: 'Recyclables',
+  shoes: 'Recyclables',
+  rag: 'Recyclables',
+  textiletrash: 'Recyclables',
+
+  trash: 'General waste',
+  bandaid: 'General waste',
+  bowlsanddishes: 'General waste',
+  chopsticks: 'General waste',
+  cigarettebutt: 'General waste',
+  diapers: 'General waste',
+  facialmask: 'General waste',
+  napkin: 'General waste',
+  toothpick: 'General waste',
+  miscellaneoustrash: 'General waste',
+}
 
 export default function Page() {
   const [lang, setLang] = useState<Lang>(() => {
@@ -947,9 +1001,7 @@ async function predictTop3(
 
   const mappedTop3 = mapScoresToTrashPredictions(scores, objectClasses)
   const rawTop3 = getRawObjectTop3(scores, objectClasses)
-  const confidenceThreshold =
-    scores.length > supportedLabels.length ? LOW_CONFIDENCE_THRESHOLD_12CLASS : LOW_CONFIDENCE_THRESHOLD
-  const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < confidenceThreshold
+  const isUndetermined = (mappedTop3[0]?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD
 
   return {
     mappedTop3,
@@ -1044,11 +1096,25 @@ function mapScoresToTrashPredictions(scores: number[], objectClasses: string[]):
       .slice(0, 3)
   }
 
-  // Case B: model outputs N object classes; keep direct class predictions.
-  return scores
-    .map((confidence, index) => ({
-      label: objectClasses[index] ?? `class-${index}`,
-      confidence,
+  // Case B: model outputs N object classes; aggregate into 5 disposal groups.
+  const groupedScores: Record<LabelKey, number> = {
+    'General waste': 0,
+    'Food waste': 0,
+    Recyclables: 0,
+    'Hazardous waste': 0,
+    'Bulk waste': 0,
+  }
+
+  scores.forEach((confidence, index) => {
+    const className = objectClasses[index] ?? `class-${index}`
+    const mappedLabel = mapObjectClassToSupported(className)
+    groupedScores[mappedLabel] += confidence
+  })
+
+  return supportedLabels
+    .map((label) => ({
+      label,
+      confidence: groupedScores[label],
     }))
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3)
@@ -1081,6 +1147,73 @@ function mapLabelAliasToSupported(label: string): LabelKey | null {
     return 'General waste'
   }
   return null
+}
+
+function mapObjectClassToSupported(className: string): LabelKey {
+  const normalized = normalizeClassToken(className)
+  if (!normalized) return 'General waste'
+
+  const direct = RAW_CLASS_TO_SUPPORTED[normalized]
+  if (direct) return direct
+
+  if (
+    normalized.includes('battery') ||
+    normalized.includes('bulb') ||
+    normalized.includes('hazard') ||
+    normalized.includes('medicine') ||
+    normalized.includes('thermometer') ||
+    normalized.includes('capsule') ||
+    normalized.includes('pesticide') ||
+    normalized.includes('nailpolish') ||
+    normalized.includes('light')
+  ) {
+    return 'Hazardous waste'
+  }
+
+  if (
+    normalized.includes('food') ||
+    normalized.includes('kitchen') ||
+    normalized.includes('organic') ||
+    normalized.includes('vegetation') ||
+    normalized.includes('leftover') ||
+    normalized.includes('fruit') ||
+    normalized.includes('vegetable') ||
+    normalized.includes('rind')
+  ) {
+    return 'Food waste'
+  }
+
+  if (
+    normalized.includes('paper') ||
+    normalized.includes('cardboard') ||
+    normalized.includes('carton') ||
+    normalized.includes('plastic') ||
+    normalized.includes('glass') ||
+    normalized.includes('metal') ||
+    normalized.includes('can') ||
+    normalized.includes('bottle') ||
+    normalized.includes('cloth') ||
+    normalized.includes('textile') ||
+    normalized.includes('shoe') ||
+    normalized.includes('recycl')
+  ) {
+    return 'Recyclables'
+  }
+
+  if (
+    normalized.includes('bulk') ||
+    normalized.includes('large') ||
+    normalized.includes('furniture') ||
+    normalized.includes('appliance')
+  ) {
+    return 'Bulk waste'
+  }
+
+  return 'General waste'
+}
+
+function normalizeClassToken(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
 }
 
 function getRawObjectTop3(scores: number[], objectClasses: string[]): RawPredictionItem[] {
