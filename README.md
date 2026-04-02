@@ -44,6 +44,7 @@ npm run start
 
 - `labels.txt` 一行一个类别名，顺序必须与训练输出一致。
 - 页面支持任意类别数模型：当模型输出不是 5 类时，会先按原始类别做推理，再聚合到五大类展示（General/Food/Recyclables/Hazardous/Bulk）。
+- 当前已接入 TACO 转换数据，模型类别由 `labels.txt` 决定（当前为 109 类，含 `background`）。
 
 ## 4. 与训练仓库联动（推荐）
 
@@ -53,7 +54,7 @@ npm run start
 
 ```powershell
 cd /d D:\Code\Python\Docker_project
-docker compose run --rm my_app python /opt/project/ml/run_pipeline.py --use-all-three --all-classes --low-memory
+docker compose run --rm my_app python /opt/project/ml/run_pipeline.py --use-all-three --all-classes --use-taco --taco-dir E:\dataset\taco_cls_raw --low-memory
 ```
 
 训练结束后，同步模型到前端：
@@ -127,7 +128,7 @@ Python 相关代码在：`D:\Code\Python\Docker_project\ml`
 
 已补充到的下载线索：
 
-- `garbage_classification`：Kaggle 临时签名下载地址（你提供，2026-03-31 生成，短期有效）
+- `garbage_classification`：Kaggle 临时签名下载地址
   - `https://storage.googleapis.com/kaggle-data-sets/390259/753037/bundle/archive.zip?...`
 
 如果你确认了原始下载页，建议把链接补在这里，便于后续复现和合规说明。
