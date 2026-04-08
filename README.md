@@ -8,11 +8,11 @@ Next.js + TensorFlow.js 浏览器端图片分类项目。
 
 - 图片输入：拍照 / 本地上传 / URL / 剪贴板
 - 浏览器端模型推理：TensorFlow.js
-- 结果展示：Top3、置信度、原始类别名
+- 结果展示：Top3、置信度、原始类别名、五大类聚合
 - 管理页：`/admin` 本地日志筛选与 CSV 导出
 - 多语言：中文 / 한국어
 
-训练与数据处理放在独立仓库：`D:\Code\Python\Docker_project`。
+训练与数据处理在独立仓库：`D:\Code\Python\Docker_project`。
 
 ## 2. 快速启动
 
@@ -28,9 +28,9 @@ npm run build
 npm run start
 ```
 
-## 3. 模型文件放置规范
+## 3. 模型放置规范
 
-把 TFJS 模型放到：
+将 TFJS 模型文件放到：
 
 - `public/model/model.json`
 - `public/model/group1-shard*.bin`
@@ -42,108 +42,55 @@ npm run start
 
 说明：
 
-- `labels.txt` 一行一个类别名，顺序必须与训练输出一致。
-- 页面支持任意类别数模型：当模型输出不是 5 类时，会先按原始类别做推理，再聚合到五大类展示（General/Food/Recyclables/Hazardous/Bulk）。
-- 当前已接入 TACO 转换数据，模型类别由 `labels.txt` 决定（当前为 109 类，含 `background`）。
+- `labels.txt` 必须和模型输出顺序一致（一行一个类别名）。
+- 支持“原始多类别 -> 五大类”展示逻辑。
+- `background` 类会显示为“不可判定/背景”。
 
-## 4. 与训练仓库联动（推荐）
+## 4. 与训练仓库联动
 
 训练仓库：`D:\Code\Python\Docker_project`
 
-推荐训练命令（三目录参与，按原始类别训练）：
+推荐完整训练命令（三数据目录 + TACO + 全类别）：
 
 ```powershell
 cd /d D:\Code\Python\Docker_project
 docker compose run --rm my_app python /opt/project/ml/run_pipeline.py --use-all-three --all-classes --use-taco --taco-dir E:\dataset\taco_cls_raw --low-memory
 ```
 
-训练结束后，同步模型到前端：
+训练完成后拷贝模型：
 
 ```powershell
 Copy-Item -Force D:\Code\Python\Docker_project\ml\artifacts\all_classes\tfjs_model\* D:\Code\npc_project\public\model\
 ```
 
-再更新前端缓存版本：
+更新前端模型缓存版本：
 
 - 文件：`app/page.tsx`
 - 常量：`MODEL_VERSION = 'model-vX'`
 
-## 5. Python 数据/训练代码说明（Docker_project）
+## 5. 数据来源（训练仓库使用）
 
-Python 相关代码在：`D:\Code\Python\Docker_project\ml`
+- Garbage Classification（12类）  
+  https://www.kaggle.com/datasets/mostafaabla/garbage-classification
+- Waste Pictures（34类）  
+  https://www.kaggle.com/datasets/wangziang/waste-pictures
+- RealWaste  
+  https://archive.ics.uci.edu/dataset/908/realwaste
+- TACO（Trash Annotations in Context）  
+  https://github.com/pedropro/TACO
 
-核心脚本：
+## 6. 当前状态（2026-04-08）
 
-- `run_pipeline.py`
-  - 训练入口脚本，串联“数据准备 -> 切分 -> 训练 -> 导出 TFJS”。
-  - 常用参数：
-    - `--use-all-three`：使用三个数据目录
-    - `--all-classes`：不做12类映射，按原始类别训练
-    - `--low-memory`：低内存参数（更稳）
-
-- `prepare_all3_raw_dataset.py`
-  - 三数据源全类别合并（推荐模式）。
-  - 会规范化类别名，并复制到统一目录。
-
-- `prepare_all3_coarse_dataset.py`
-  - 三数据源映射到 12 类再训练（兼容旧模式）。
-
-- `prepare_coarse_dataset.py`
-  - 仅 `garbage_classification + realwaste` 的粗类合并脚本。
-
-- `split_dataset.py`
-  - 把统一数据切分成 `train/val/test`。
-
-- `train.py`
-  - TensorFlow 训练脚本。
-  - 已支持：
-    - 坏图扫描与清单导出（`bad_images_report.json/txt`）
-    - 坏图跳过不中断
-    - repeat + 动态 `steps_per_epoch`，避免提前结束
-    - SavedModel 稳健导出
-
-- `export_tfjs.py`
-  - 将 SavedModel 导出为 TFJS 模型。
-
-训练产物目录：
-
-- 全类别：`ml/artifacts/all_classes`
-- 12类：`ml/artifacts/coarse`
-
-中间数据目录（每次带时间戳，不覆盖历史）：
-
-- `E:\dataset\pipeline_runs\YYYYMMDD_HHMMSS\...`
-
-### 数据来源备注（2026-04-03）
-
-当前可确认来源：
-
-- `garbage_classification`（12类）
-  - https://www.kaggle.com/datasets/mostafaabla/garbage-classification
-
-- `realwaste-main/RealWaste`：RealWaste 数据集
-  - https://archive.ics.uci.edu/dataset/908/realwaste
-
-- `train`（34类）
-  - https://www.kaggle.com/datasets/wangziang/waste-pictures
-
-- `TACO`：Trash Annotations in Context（原始检测/分割数据）
-  - https://github.com/pedropro/TACO
-  - 本机原始目录：`E:\dataset\TACO\data`
-  - 本项目训练使用的转换目录：`E:\dataset\taco_cls_raw`（由 `prepare_taco_dataset.py` 生成）
-
-## 6. 当前仓库目录职责
-
-- `app/`：页面与业务逻辑（模型加载、推理、展示）
-- `public/model/`：前端推理模型文件
-- `app/i18n/`：中韩文案
-- `app/admin/`：日志管理页
+- Pipeline 已完整成功：`Pipeline finished successfully.`
+- TFJS 导出成功：`ml/artifacts/all_classes/tfjs_model/model.json`
+- 前端已支持动态类别与中韩类别翻译。
+- 当前页面使用全类别模型（`labels.txt` 决定具体类别数）。
 
 ## 7. 常见问题
 
 ### 7.1 `no configuration file provided: not found`
 
-在 `cmd` 里请用：
+在 `cmd` 里使用：
 
 ```cmd
 cd /d D:\Code\Python\Docker_project
@@ -157,15 +104,11 @@ cd /d D:\Code\Python\Docker_project
 - `group1-shard*.bin` 是否齐全
 - `labels.txt` 是否与输出维度匹配
 
-### 7.3 页面仍是旧模型结果
+### 7.3 页面还是旧结果
 
 - 修改 `MODEL_VERSION`
-- 强刷浏览器缓存
+- 强制刷新浏览器缓存
 
-### 7.4 摄像头打不开
+### 7.4 控制台出现 NUMA / iCCP 警告
 
-检查：
-
-- 权限是否允许
-- 是否 HTTPS / localhost
-- 是否被其他程序占用
+- 多数是环境或 PNG 元数据提示，通常不影响训练和导出成功。
