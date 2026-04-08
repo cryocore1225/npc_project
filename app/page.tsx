@@ -1079,7 +1079,8 @@ async function predictTop3(
 }
 
 async function downloadImageToBlobUrl(url: string) {
-  const response = await fetch(url, { mode: 'cors', cache: 'no-store' })
+  const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(url)}`
+  const response = await fetch(proxyUrl, { cache: 'no-store' })
   if (!response.ok) {
     throw new Error(`Failed to load image: ${response.status}`)
   }
