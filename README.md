@@ -114,24 +114,23 @@ Python 相关代码在：`D:\Code\Python\Docker_project\ml`
 
 - `E:\dataset\pipeline_runs\YYYYMMDD_HHMMSS\...`
 
-### 数据来源备注（2026-04-02）
+### 数据来源备注（2026-04-03）
 
 当前可确认来源：
 
-- `realwaste-main/RealWaste`：RealWaste 数据集（`E:\dataset\realwaste-main\README.md` 可查）
-  - https://www.mdpi.com/2078-2489/14/12/633
+- `garbage_classification`（12类）
+  - https://www.kaggle.com/datasets/mostafaabla/garbage-classification
 
-当前待补来源链接（本地无元数据）：
+- `realwaste-main/RealWaste`：RealWaste 数据集
+  - https://archive.ics.uci.edu/dataset/908/realwaste
 
-- `E:\dataset\garbage_classification`（12类）
-- `E:\dataset\train`（34类）
+- `train`（34类）
+  - https://www.kaggle.com/datasets/wangziang/waste-pictures
 
-已补充到的下载线索：
-
-- `garbage_classification`：Kaggle 临时签名下载地址
-  - `https://storage.googleapis.com/kaggle-data-sets/390259/753037/bundle/archive.zip?...`
-
-如果你确认了原始下载页，建议把链接补在这里，便于后续复现和合规说明。
+- `TACO`：Trash Annotations in Context（原始检测/分割数据）
+  - https://github.com/pedropro/TACO
+  - 本机原始目录：`E:\dataset\TACO\data`
+  - 本项目训练使用的转换目录：`E:\dataset\taco_cls_raw`（由 `prepare_taco_dataset.py` 生成）
 
 ## 6. 当前仓库目录职责
 
