@@ -530,11 +530,16 @@ export default function Page() {
     setMainResult(null)
     setIsUndetermined(false)
     setPreviewMeta(null)
-    setPreviewImage(target)
-    setFileName('remote-image')
     setIsUploadPanelOpen(false)
 
-    await runPredictFromUrl(target, 'url', t.urlLoadFailed)
+    try {
+      const blobUrl = await downloadImageToBlobUrl(target)
+      setPreviewImage(blobUrl, blobUrl)
+      setFileName(getRemoteFileName(target))
+      await runPredictFromUrl(blobUrl, 'url', t.urlLoadFailed)
+    } catch {
+      setPredictionError(`${t.urlLoadFailed} (CORS blocked or URL not directly accessible)`)
+    }
   }
 
   async function loadFromClipboard() {
@@ -1038,6 +1043,9 @@ function formatConfidence(value: number) {
 
 async function readImage(src: string): Promise<HTMLImageElement> {
   const image = new Image()
+  if (!src.startsWith('blob:') && !src.startsWith('data:')) {
+    image.crossOrigin = 'anonymous'
+  }
   image.src = src
 
   await new Promise<void>((resolve, reject) => {
@@ -1067,6 +1075,30 @@ async function predictTop3(
     mappedTop3,
     rawTop3,
     isUndetermined,
+  }
+}
+
+async function downloadImageToBlobUrl(url: string) {
+  const response = await fetch(url, { mode: 'cors', cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`Failed to load image: ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  if (!blob.type.startsWith('image/')) {
+    throw new Error('URL did not return an image')
+  }
+
+  return URL.createObjectURL(blob)
+}
+
+function getRemoteFileName(url: string) {
+  try {
+    const parsed = new URL(url)
+    const candidate = parsed.pathname.split('/').filter(Boolean).pop()
+    return candidate || 'remote-image'
+  } catch {
+    return 'remote-image'
   }
 }
 
